@@ -53,6 +53,18 @@ namespace MarmotLibrary {
                                              int                nMaterialProperties,
 
                                              const Marmot::Meshfree::MarmotMeshfreeApproximation& approximation );
+
+    using mixedParticleFactoryFunction = Marmot::Meshfree::MarmotParticle* (*)(
+      int, 
+      const double*, 
+      int, 
+      double, 
+      const std::string&, 
+      const double*, 
+      int, 
+      const Marmot::Meshfree::MarmotMeshfreeApproximation&, 
+      const Marmot::Meshfree::MarmotMeshfreeApproximation&);
+
     MarmotParticleFactory() = delete;
 
     static Marmot::Meshfree::MarmotParticle* createParticle(
@@ -69,12 +81,29 @@ namespace MarmotLibrary {
 
       const Marmot::Meshfree::MarmotMeshfreeApproximation& approximation );
 
+    static Marmot::Meshfree::MarmotParticle* createParticle(
+      const std::string& particleName,
+      int                materialNumber,
+      const double*      vertexCoordinates,
+      int                sizeVertexCoordinates,
+      double             volume,
+      // MarmotMaterialPoint&                                 mp,
+      //
+      const std::string& materialName,
+      const double*      materialProperties,
+      int                nMaterialProperties,
+
+      const Marmot::Meshfree::MarmotMeshfreeApproximation& approximationU ,
+      const Marmot::Meshfree::MarmotMeshfreeApproximation& approximationPJ );
+
     static bool registerParticle( const std::string& particleName, particleFactoryFunction factoryFunction );
+    static bool registerParticle( const std::string& particleName, mixedParticleFactoryFunction factoryFunction );
 
   private:
     bool checkIfParticleIsRegistered( const std::string& particleName );
 
     static std::unordered_map< std::string, particleFactoryFunction > particleFactoryFunctionByName;
+    static std::unordered_map< std::string, mixedParticleFactoryFunction > mixedParticleFactoryFunctionByName;
   };
 
 } // namespace MarmotLibrary
