@@ -82,6 +82,13 @@ namespace Marmot::Meshfree {
     virtual void assignMeshfreeKernelFunctions(
       const std::vector< const MarmotMeshfreeKernelFunction* >& kernelFunctions ) = 0;
 
+    virtual void assignMeshfreeKernelFunctions(
+        const std::vector< const MarmotMeshfreeKernelFunction* >& kernelFunctionsU,
+        const std::vector< const MarmotMeshfreeKernelFunction* >& kernelFunctionsPJ )
+    {
+      this->assignMeshfreeKernelFunctions( kernelFunctionsU );
+    }
+
     virtual void assignStateVars( double* stateVars, int nStateVars ) = 0;
 
     virtual void initializeYourself() = 0;
