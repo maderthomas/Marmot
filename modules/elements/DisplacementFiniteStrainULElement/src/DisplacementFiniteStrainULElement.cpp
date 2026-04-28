@@ -32,6 +32,7 @@ namespace Marmot::Elements::Registration {
      * */
 
     CPE8RUL  = CONCAT( 1193, 83801 ),
+    CPE8UL  = CONCAT( 2212, 83701 ),
     C3D8UL   = CONCAT( 1193, 83301 ),
     C3D20UL  = CONCAT( 1193, 203301 ),
     C3D20RUL = CONCAT( 1193, 203601 ),
@@ -71,6 +72,13 @@ namespace Marmot::Elements::Registration {
                      DisplacementFiniteStrainULElementCode::CPE8RUL,
                      makeFactoryFunction< DisplacementFiniteStrainULElement< 2, 8 >,
                                           ReducedIntegration,
+                                          DisplacementFiniteStrainULElement< 2, 8 >::PlaneStrain >() );
+
+  const static bool CPE8UL_isRegistered = MarmotElementFactory::
+    registerElement( "CPE8UL",
+                     DisplacementFiniteStrainULElementCode::CPE8UL,
+                     makeFactoryFunction< DisplacementFiniteStrainULElement< 2, 8 >,
+                                          FullIntegration,
                                           DisplacementFiniteStrainULElement< 2, 8 >::PlaneStrain >() );
 
   const static bool C3D8UL_isRegistered = MarmotLibrary::MarmotElementFactory::

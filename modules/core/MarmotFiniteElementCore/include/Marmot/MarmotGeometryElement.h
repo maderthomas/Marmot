@@ -13,6 +13,7 @@
  *
  * Matthias Neuner matthias.neuner@uibk.ac.at
  * Magdalena Schreter magdalena.schreter@uibk.ac.at
+ * Thomas Mader thomas.mader@boku.ac.at
  *
  * This file is part of the MAteRialMOdellingToolbox (marmot).
  *
@@ -93,6 +94,8 @@ public:
    * */
   NSized             N( const XiSized& xi ) const;
   dNdXiSized         dNdXi( const XiSized& xi ) const;
+  dNdXidXiSized      dNdXidXi( const XiSized& xi ) const;
+
   BSized             B( const dNdXiSized& dNdX ) const;
   BSizedAxisymmetric B_axisymmetric( const dNdXiSized& dNdX, const NSized& N, const XiSized& x_gauss ) const;
   BSized             B_bar( const dNdXiSized& dNdX, const dNdXiSized& dNdX0 ) const;
