@@ -250,6 +250,8 @@ on is small enough
       throw std::runtime_error( MakeString() << __PRETTY_FUNCTION__ << ": State " << stateName
                                              << " not supported by GenericSmallStrainParticle." );
     }
+
+    virtual void acceptStateAndPosition() override {}
   };
 
   template < int nDim >
