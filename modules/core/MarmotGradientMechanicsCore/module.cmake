@@ -4,4 +4,7 @@ list(APPEND sources ${module_sources})
 list(APPEND publicheaders
     "${CMAKE_CURRENT_LIST_DIR}/include/Marmot/MarmotMaterialGeneralGradientEnhancedHypoElastic.h"
     "${CMAKE_CURRENT_LIST_DIR}/include/Marmot/MarmotMaterialGeneralGradientEnhancedHypoElasticFactory.h"
+    "${CMAKE_CURRENT_LIST_DIR}/include/Marmot/MarmotMaterialGradientPlasticityFiniteStrain.h"
+    "${CMAKE_CURRENT_LIST_DIR}/include/Marmot/MarmotMaterialGradientPlasticityFiniteStrainAD.h"
+    "${CMAKE_CURRENT_LIST_DIR}/include/Marmot/MarmotMaterialGradientPlasticityFiniteStrainFactory.h"
     )

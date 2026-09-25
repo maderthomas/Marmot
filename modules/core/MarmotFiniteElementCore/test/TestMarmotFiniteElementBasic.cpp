@@ -126,12 +126,12 @@ void testGetGaussPointInfoThrowsForUnsupportedShape()
 
   bool threw = false;
   try {
-    getGaussPointInfo( Quad9, FullIntegration );
+    getGaussPointInfo( Quad16, FullIntegration );
   }
   catch ( const std::invalid_argument& ) {
     threw = true;
   }
-  throwExceptionOnFailure( threw, "getGaussPointInfo() must throw for an unsupported shape (Quad9)." );
+  throwExceptionOnFailure( threw, "getGaussPointInfo() must throw for an unsupported shape (Quad16)." );
 }
 
 void testGetNumGaussPointsMatchesGaussPointInfoSize()
