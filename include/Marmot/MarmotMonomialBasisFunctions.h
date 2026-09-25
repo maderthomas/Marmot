@@ -74,6 +74,11 @@ namespace Marmot::Math {
                                                      int                    idxEnd,
                                                      int                    dim )
   {
+    // column j of res is grad_j of the monomial: the derivative factor in dimension j
+    // times the PLAIN powers of all other dimensions. Each recursion level multiplies
+    // every column by its factor (res starts at ones), so mixed monomials like x*y get
+    // grad = (y, x), not the bare derivative factors (1, 1).
+    const int nDimTotal = static_cast< int >( x.size() );
     for ( int i = 0; i <= order; i++ ) {
 
       const int idxStart = idxEnd;
@@ -83,12 +88,11 @@ namespace Marmot::Math {
       else {
         idxEnd++;
       }
-      for ( int idx = idxStart; idx < idxEnd; idx++ ) {
-        if ( i > 0 )
-          res( idx, dim - 1 ) = i * std::pow( x[dim - 1], i - 1 );
-        else
-          res( idx, dim - 1 ) = 0;
-      }
+      const double f  = std::pow( x[dim - 1], i );
+      const double df = i > 0 ? i * std::pow( x[dim - 1], i - 1 ) : 0.0;
+      for ( int idx = idxStart; idx < idxEnd; idx++ )
+        for ( int j = 0; j < nDimTotal; j++ )
+          res( idx, j ) *= ( j == dim - 1 ) ? df : f;
     }
     return idxEnd;
   }

@@ -100,6 +100,9 @@ namespace Marmot::Meshfree {
     Eigen::Map< CoordinatesSized > _centerDisplacement;              ///< Mapped central displacement vector.
     Eigen::Map< JacobianSized >    _centralDeformationGradient;      ///< Mapped central deformation gradient tensor.
     Eigen::Map< JacobianSized >    _centralDeformationGradientDelta; ///< Mapped central deformation gradient tensor.
+    CoordinatesSized _centerDisplacementDelta; ///< Central displacement increment of the current increment
+                                               ///< (re-evaluated each iteration, folded into
+                                               ///< _centerDisplacement on acceptStateAndPosition).
 
     KernelFunctionVector _assignedKernelFunctions; ///< Pointers to the kernel functions assigned to this particle.
 
@@ -228,6 +231,7 @@ namespace Marmot::Meshfree {
     void initializeYourself() override
     {
       _centerDisplacement.setZero();
+      _centerDisplacementDelta.setZero();
       _centralDeformationGradient.setIdentity();
       _centralDeformationGradientDelta.setIdentity();
 
@@ -275,6 +279,9 @@ namespace Marmot::Meshfree {
     {
       _centralDeformationGradient = _centralDeformationGradientDelta * _centralDeformationGradient;
       _centralDeformationGradientDelta.setIdentity();
+
+      _centerDisplacement += _centerDisplacementDelta;
+      _centerDisplacementDelta.setZero();
 
       _particleDomainMain.acceptStateAndPosition( _centralDeformationGradient, _centerDisplacement );
       for ( auto& sd : _subDomains )
@@ -628,9 +635,10 @@ namespace Marmot::Meshfree {
       _nVCIConstraints( 0 ), // Initialized here, then set by setVCIOrder
       _meshfreeApproximation( approximation ),
       _particleDomainMain( vertexCoordinates, nVertexCoordinates, smoothingVolumeUpdateType ),
-      _centerDisplacement( nullptr ),             // Initialized to nullptr, will be re-mapped
-      _centralDeformationGradient( nullptr ),     // Initialized to nullptr, will be re-mapped
-      _centralDeformationGradientDelta( nullptr ) // Initialized to nullptr, will be re-mapped
+      _centerDisplacement( nullptr ),              // Initialized to nullptr, will be re-mapped
+      _centralDeformationGradient( nullptr ),      // Initialized to nullptr, will be re-mapped
+      _centralDeformationGradientDelta( nullptr ), // Initialized to nullptr, will be re-mapped
+      _centerDisplacementDelta( CoordinatesSized::Zero() )
   {
     _subDomains = _particleDomainMain.uniformSubdivided();
     _subDomainShapeFunctions.reserve( _subDomains.size() ); // Pre-allocate memory
@@ -859,7 +867,10 @@ namespace Marmot::Meshfree {
   {
     using namespace Fastor;
     using namespace Marmot::FastorIndices;
-    constexpr int nodeBlockSize = nDim;
+    // the displacement dofs are the first nDim entries of each node block; mixed
+    // formulations (e.g. u-p-J) carry additional dofs per node, so the stride must
+    // come from the concrete particle, not from nDim
+    const int nodeBlockSize = this->getNBaseDof();
     // update central deformation and displacement.
     TensorD  _du_center( 0.0 );
     TensorDD _dx_dY_center;
@@ -888,7 +899,10 @@ namespace Marmot::Meshfree {
     }
 
     Eigen::Map< CoordinatesSized > du_center_eigen( _du_center.data() ); // Use alias
-    _centerDisplacement += du_center_eigen;
+    // dQ is the FULL increment each Newton iteration, so the center displacement of the
+    // increment must be assigned (like _centralDeformationGradientDelta), not accumulated;
+    // it is folded into _centerDisplacement once, in acceptStateAndPosition().
+    _centerDisplacementDelta = du_center_eigen;
 
     Eigen::Map< Eigen::Matrix< double, nDim, nDim, Eigen::RowMajor > > dx_dY_map(
       _dx_dY_center.data() ); // Use RowMajor for Fastor compatibility
