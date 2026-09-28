@@ -73,5 +73,7 @@ jobs:
           sudo apt-get install -y gdb > /dev/null 2>&1
           cd build
           grep -h 'CXX_FLAGS\|CXX_DEFINES' CMakeFiles/TestDisplacementParticle.dir/flags.make
-          gdb -batch -ex run -ex bt -ex 'info frame' -ex 'x/6i $pc-12' ./bin/TestDisplacementParticle 2>&1 | tail -60
+          gdb -batch -ex run -ex bt -ex 'info registers' -ex 'disassemble $pc-64,$pc+16' ./bin/TestDisplacementParticle 2>&1 | tail -80
+          echo "== objdump"
+          objdump -d --no-show-raw-insn -C lib/libMarmot.so.1 | awk '/<Marmot::MaterialPoints::DisplacementMaterialPoint2D::computeYourself\(double, double\)>:/{f=1} f{print} f&&/^$/{exit}' | sed -n '180,240p'
           echo "debug step done"
