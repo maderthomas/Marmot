@@ -68,11 +68,10 @@ jobs:
 
       - name: Debug TestDisplacementParticle
         if: failure()
-        shell: bash -leo pipefail {0}
+        shell: bash {0}
         run: |
-          sudo apt-get install -y gdb > /dev/null
+          sudo apt-get install -y gdb > /dev/null 2>&1
           cd build
-          ls bin | head -3 || true
-          echo "== without MALLOC_PERTURB_"; ./bin/TestDisplacementParticle > /dev/null 2>&1; echo "rc=$?"
-          echo "== with MALLOC_PERTURB_=165 under gdb"
-          MALLOC_PERTURB_=165 gdb -batch -ex run -ex bt -ex 'info frame' ./bin/TestDisplacementParticle 2>&1 | tail -80 || true
+          grep -h 'CXX_FLAGS\|CXX_DEFINES' CMakeFiles/TestDisplacementParticle.dir/flags.make
+          gdb -batch -ex run -ex bt -ex 'info frame' -ex 'x/6i $pc-12' ./bin/TestDisplacementParticle 2>&1 | tail -60
+          echo "debug step done"
