@@ -304,12 +304,19 @@ namespace Marmot::Cells {
       const auto dL_dqU = evaluate( + einsum< kl,   lB >( t.dL_dDeltaF, dN_dY ) );
 
       r_U  += ( + einsum< iA, ij >( dN_dx, S )                                                          ) * V0;
-      r_N  += ( N * dNonLocalField + c * einsum< iA, iB, B >( dN_dX, dN_dX, dQN ) - N * dLocalField    ) * V0;
+      if ( mp->response.hasGradientTensor ) // anisotropic implicit gradient, L0 in the reference configuration
+        r_N += ( N * dNonLocalField + einsum< iA, ij, jB, B >( dN_dX, mp->response.gradientTensor, dN_dX, dQN ) - N * dLocalField ) * V0;
+      else
+        r_N  += ( N * dNonLocalField + c * einsum< iA, iB, B >( dN_dX, dN_dX, dQN ) - N * dLocalField    ) * V0;
 
       k_UU += ( + einsum< iA, ijkB, to_jAkB >( dN_dx, dS_dqU ) - einsum< kA, ij, iB, to_jAkB >( dN_dx, S, dN_dx ) ) * V0;
       k_UN += ( + einsum< iA,  ijB,  to_jAB >( dN_dx, dS_dqN )                                          ) * V0;
       k_NU += ( - einsum<  A,   kB          >( N,     dL_dqU )                                          ) * V0;
-      k_NN += ( + einsum<  A,    B          >( N,     N      ) * ( 1. - t.dL_dN )
+      if ( mp->response.hasGradientTensor )
+        k_NN += ( + einsum<  A,    B          >( N,     N      ) * ( 1. - t.dL_dN )
+                  + einsum< iA, ij, jB        >( dN_dX, mp->response.gradientTensor, dN_dX )             ) * V0;
+      else
+        k_NN += ( + einsum<  A,    B          >( N,     N      ) * ( 1. - t.dL_dN )
                 + einsum< iA,   iB          >( dN_dX, dN_dX  ) * c                                      ) * V0;
       // clang-format on
     }
