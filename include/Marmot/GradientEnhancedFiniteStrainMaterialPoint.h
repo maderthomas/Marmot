@@ -211,6 +211,10 @@ namespace Marmot::MaterialPoints {
       Fastor::Tensor< double, nDim, nDim > S;  ///< Kirchhoff stress tau
       double                               dL; ///< increment of the local damage driving force
       double                               nonLocalRadius;
+      /// optional anisotropic gradient tensor L0 of the nonlocal balance (reference configuration);
+      /// replaces nonLocalRadius^2 I in the consumers only if hasGradientTensor is set
+      Fastor::Tensor< double, nDim, nDim > gradientTensor;
+      bool                                 hasGradientTensor;
     } response;
 
     struct {

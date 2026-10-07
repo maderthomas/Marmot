@@ -37,9 +37,11 @@ namespace Marmot::MaterialPoints {
       material->computePlaneStrain( response3D, algorithmicModuli3D, deformation3D, timeIncrement );
 
     // clang-format off
-    this->response = { .S              = reduceTo2D< U, U >( response3D.tau ),
-                       .dL             = response3D.L - state->localDamage,
-                       .nonLocalRadius = response3D.nonLocalRadius };
+    this->response = { .S                 = reduceTo2D< U, U >( response3D.tau ),
+                       .dL                = response3D.L - state->localDamage,
+                       .nonLocalRadius    = response3D.nonLocalRadius,
+                       .gradientTensor    = reduceTo2D< U, U >( response3D.gradientTensor ),
+                       .hasGradientTensor = response3D.hasGradientTensor };
     // clang-format on
 
     state->localDamage = response3D.L;
@@ -98,9 +100,11 @@ namespace Marmot::MaterialPoints {
       material->computeStress( response3D, algorithmicModuli3D, deformation3D, timeIncrement );
 
     // clang-format off
-    this->response = { .S              = ( response3D.tau ),
-                       .dL             = response3D.L - state->localDamage,
-                       .nonLocalRadius = response3D.nonLocalRadius };
+    this->response = { .S                 = ( response3D.tau ),
+                       .dL                = response3D.L - state->localDamage,
+                       .nonLocalRadius    = response3D.nonLocalRadius,
+                       .gradientTensor    = response3D.gradientTensor,
+                       .hasGradientTensor = response3D.hasGradientTensor };
     // clang-format on
 
     state->localDamage = response3D.L;
