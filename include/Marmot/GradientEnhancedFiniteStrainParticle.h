@@ -519,7 +519,10 @@ namespace Marmot::Meshfree {
         const int idxA_n = nodeBlockSize * A + nDim;
 
         r_U = ( +einsum< i, ij >( dT_A_dx, S ) ) * V0;
-        r_N = evaluate( ( T_A * dn + c * einsum< i, i >( dT_A_dX, dn_dX ) - T_A * dLocalField ) * V0 ).toscalar();
+        if ( _mp.response.hasGradientTensor ) // anisotropic implicit gradient, L0 in the reference configuration
+          r_N = evaluate( ( T_A * dn + einsum< i, ij, j >( dT_A_dX, _mp.response.gradientTensor, dn_dX ) - T_A * dLocalField ) * V0 ).toscalar();
+        else
+          r_N = evaluate( ( T_A * dn + c * einsum< i, i >( dT_A_dX, dn_dX ) - T_A * dLocalField ) * V0 ).toscalar();
 
         // add inertia
         r_U += density0 * a * T_A * V0;
@@ -549,7 +552,10 @@ namespace Marmot::Meshfree {
           k_UN  = ( + einsum< i,  ij > ( dT_A_dx, dS_dqN_B )                              ) * V0;
 
           k_NU  = (                     - ( T_A * dL_dqU_B )                              ) * V0;
-          k_NN  = ( + T_A * N_B + inner( dT_A_dX, dN_B_dX ) * c                           ) * V0;
+          if ( _mp.response.hasGradientTensor )
+            k_NN  = ( + T_A * N_B + einsum< i, ij, j >( dT_A_dX, _mp.response.gradientTensor, dN_B_dX ).toscalar() ) * V0;
+          else
+            k_NN  = ( + T_A * N_B + inner( dT_A_dX, dN_B_dX ) * c                           ) * V0;
 
           k_UU += ( - einsum< k, ij, i, to_jk >( dT_A_dx, S, dN_B_dx ) ) * V0;
 
