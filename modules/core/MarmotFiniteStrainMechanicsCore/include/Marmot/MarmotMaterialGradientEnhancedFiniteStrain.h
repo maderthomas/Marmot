@@ -49,6 +49,17 @@
  * in contrast, is the Kirchhoff stress @f$ \boldsymbol{\tau} = J\,\boldsymbol{\sigma} @f$, which is what
  * integrating against the reference volume requires.
  *
+ * @note **Anisotropic regularisation (optional).** A material may replace @f$ c\,\boldsymbol{I} @f$ by a
+ * symmetric, positive definite gradient tensor @f$ \boldsymbol{L}_0 @f$ (units length^2), i.e. the balance
+ * becomes @f$ \bar{N} - \nabla_X\cdot(\boldsymbol{L}_0\nabla_X\bar{N}) = L @f$. It does so by setting
+ * ConstitutiveResponse::hasGradientTensor and ConstitutiveResponse::gradientTensor. Like @f$ c @f$,
+ * @f$ \boldsymbol{L}_0 @f$ lives in the **reference** configuration (it multiplies @f$ \nabla_X @f$ and is
+ * integrated over the reference volume). The interface has no slot for @f$ \partial\boldsymbol{L}_0/\partial
+ * \boldsymbol{F} @f$: a material reporting a deformation-dependent tensor must hold it fixed over the step
+ * (as a function of the converged state at the start of the step) for the consumers' tangent to be
+ * consistent. Consumers fall back to @f$ R^2\boldsymbol{I} @f$, with the original scalar expressions,
+ * whenever the flag is not set, so materials that never set it are unaffected bit for bit.
+ *
  * @note The interface carries a **single** scalar nonlocal field, unlike the small-strain
  * MarmotMaterialGeneralGradientEnhancedHypoElastic, which is templated on the number of nonlocal
  * variables. It also has **no slot for @f$ \partial c/\partial\bar{N} @f$**: a material with
@@ -109,6 +120,10 @@ public:
     double  elasticEnergyDensity;             ///< elastic energy per unit reference volume
     double  dissipation;                      ///< dissipation per unit reference volume
     double* stateVars;                        ///< pointer to the state variables
+    /// optional anisotropic gradient tensor @f$ \boldsymbol{L}_0 @f$ (reference configuration, length^2);
+    /// read by the consumers only if hasGradientTensor is set, otherwise @f$ R^2\boldsymbol{I} @f$ is used
+    Fastor::Tensor< double, nDim, nDim > gradientTensor;
+    bool                                 hasGradientTensor; ///< true: gradientTensor replaces @f$ R^2\boldsymbol{I} @f$
 
     /// @brief Default constructor; zeroes everything and leaves stateVars null.
     ConstitutiveResponse()
@@ -117,8 +132,21 @@ public:
         nonLocalRadius( 0.0 ),
         elasticEnergyDensity( 0.0 ),
         dissipation( 0.0 ),
-        stateVars( nullptr )
+        stateVars( nullptr ),
+        gradientTensor( 0.0 ),
+        hasGradientTensor( false )
     {
+    }
+
+    /// @brief The gradient tensor the consumers assemble: gradientTensor if set, else @f$ R^2\boldsymbol{I} @f$.
+    Fastor::Tensor< double, nDim, nDim > effectiveGradientTensor() const
+    {
+      if ( hasGradientTensor )
+        return gradientTensor;
+      Fastor::Tensor< double, nDim, nDim > c( 0.0 );
+      for ( int i = 0; i < nDim; ++i )
+        c( i, i ) = nonLocalRadius * nonLocalRadius;
+      return c;
     }
 
     /**
@@ -141,7 +169,9 @@ public:
         nonLocalRadius( nonLocalRadius_ ),
         elasticEnergyDensity( elasticEnergyDensity_ ),
         dissipation( dissipation_ ),
-        stateVars( stateVars_ )
+        stateVars( stateVars_ ),
+        gradientTensor( 0.0 ),
+        hasGradientTensor( false )
     {
     }
   };
