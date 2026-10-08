@@ -24,6 +24,9 @@ All notable changes to Marmot are documented in this file. The format follows
   element), the pluggable `MarmotBondSlipLaw` interface with its `MarmotBondSlipLawFactory`, and the bond-slip laws
   `materials/LinearElasticBondSlip` and `materials/ModelCode2010BondSlip`.
 - `MarmotMaterialFiniteStrain::computeUniaxialStress`: uniaxial stress reduction of finite strain materials.
+- `elements/BeamElement`: two-node Euler-Bernoulli beams `B23` (2D) and `B33` (3D), geometrically linear, with node
+  fields displacement and rotation and a fiber section (generic, rectangle, circle profiles) for any hypoelastic
+  material; for embedded beams (structural members) in EdelweissFE.
 
 ### Changed
 - **Breaking:** a rank-deficient moment matrix of the reproducing kernel approximations now throws
