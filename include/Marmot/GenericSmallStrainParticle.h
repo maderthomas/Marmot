@@ -57,8 +57,8 @@ on is small enough
     /// The number of currently assigned nodes (=meshfree kernel functions}
     int _nNodes;
 
-    int            _vciOrder; // order of the VCI polynomial basis
-    int            _nVCIConstraints;
+    int             _vciOrder; // order of the VCI polynomial basis
+    int             _nVCIConstraints;
     Eigen::VectorXd _P;
     Eigen::MatrixXd _P_Gradient;
 
@@ -84,15 +84,15 @@ on is small enough
       _nVCIConstraints = ( order + 1 ) * ( order + 2 ) / 2; // number of VCI constraints for polynomial basis of order
       _P.resize( _nVCIConstraints );
       _P_Gradient.resize( _nVCIConstraints, nDim );
-    };  
+    };
 
   public:
-    GenericSmallStrainParticle( int   elementID,
-                                const double* centerCoordinates0,
-                                int nCenterCoordinates0,
-                                double  volume,
+    GenericSmallStrainParticle( int                                                  elementID,
+                                const double*                                        centerCoordinates0,
+                                int                                                  nCenterCoordinates0,
+                                double                                               volume,
                                 const Marmot::Meshfree::MarmotMeshfreeApproximation& approximation );
-    
+
     // MarmotParticle interface overrides
     virtual void setProperties( const double* properties, int nProperties ) override
     {
@@ -107,7 +107,7 @@ on is small enough
         throw std::runtime_error( oss.str() );
       }
 
-      for (int i = 0; i < nProperties; i++ ) {
+      for ( int i = 0; i < nProperties; i++ ) {
         setProperty( _validProperties[i], &properties[i] );
       }
     };
@@ -131,7 +131,7 @@ on is small enough
     virtual std::vector< std::string > getPropertyNames() const override { return _validProperties; };
 
     virtual void assignMeshfreeKernelFunctions(
-      const std::vector< const MarmotMeshfreeKernelFunction* >& kernelFunctions) override
+      const std::vector< const MarmotMeshfreeKernelFunction* >& kernelFunctions ) override
     {
       _assignedKernelFunctions = kernelFunctions;
 
@@ -154,7 +154,7 @@ on is small enough
 
     virtual void getVertexCoordinates( double* coordinates ) const override
     {
-      //Default implementation: particle center is its only vertex
+      // Default implementation: particle center is its only vertex
       Eigen::Map< Eigen::Matrix< double, nDim, 1 > > coordinatesMap( coordinates );
       coordinatesMap = _centerCoordinatesUndeformed;
     }
@@ -166,7 +166,10 @@ on is small enough
 
     virtual void getCenterCoordinates( double* coordinates ) const override { getVertexCoordinates( coordinates ); }
 
-    virtual void getVisualizationVertexCoordinates( double* coordinates ) const override { getVertexCoordinates( coordinates ); }
+    virtual void getVisualizationVertexCoordinates( double* coordinates ) const override
+    {
+      getVertexCoordinates( coordinates );
+    }
 
     virtual int getNumberOfVertices() const override { return 1; };
 
@@ -185,15 +188,16 @@ on is small enough
     {
       return 1; // only one evaluation point at the center of the particle
     };
-    
+
     // VCI:
-    virtual int vci_getNumberOfConstraints() override { return _nVCIConstraints;}
+    virtual int vci_getNumberOfConstraints() override { return _nVCIConstraints; }
 
     virtual void vci_compute_Test_P_BoundaryIntegral( double*       R_AiC_RowMajor,
                                                       const double* boundarySurfaceVector,
                                                       int           boundaryFaceID ) override
     {
-     throw std::runtime_error( "Error: GenericSmallStrainParticle::vci_compute_Test_P_BoundaryIntegral not implemented." ); 
+      throw std::runtime_error(
+        "Error: GenericSmallStrainParticle::vci_compute_Test_P_BoundaryIntegral not implemented." );
     };
 
     virtual void vci_compute_TestGradient_P_Integral( double* R_AiC_RowMajor ) override
@@ -203,9 +207,8 @@ on is small enough
       for ( int A = 0; A < _nNodes; A++ )
         for ( int i = 0; i < nDim; i++ )
           for ( int C = 0; C < _nVCIConstraints; C++ )
-            R_AiC_RowMajor[A * ( nDim * _nVCIConstraints ) + i * _nVCIConstraints + C] += _dT_dx( i, A ) *
-                                                                                          _P( C ) *
-                                                                                          _volUndeformed;  
+            R_AiC_RowMajor[A * ( nDim * _nVCIConstraints ) + i * _nVCIConstraints + C] += _dT_dx( i, A ) * _P( C ) *
+                                                                                          _volUndeformed;
     };
 
     virtual void vci_compute_Test_PGradient_Integral( double* R_AiC_RowMajor ) override
@@ -239,7 +242,8 @@ on is small enough
         const double R_A = _assignedKernelFunctions[A]->isInSupport( _centerCoordinatesUndeformed.data() ) ? 1.0 : 0.0;
         for ( int i = 0; i < nDim; i++ ) {
           for ( int C = 0; C < _nVCIConstraints; C++ ) {
-            _dT_dx( i, A ) += eta_AiC_RowMajor[A * ( nDim * _nVCIConstraints ) + i * _nVCIConstraints + C] * _P( C ) * R_A;
+            _dT_dx( i, A ) += eta_AiC_RowMajor[A * ( nDim * _nVCIConstraints ) + i * _nVCIConstraints + C] * _P( C ) *
+                              R_A;
           }
         }
       }
@@ -255,11 +259,12 @@ on is small enough
   };
 
   template < int nDim >
-  GenericSmallStrainParticle< nDim >::GenericSmallStrainParticle( int                                                   elementID,
-                                                                  const double*                                         centerCoordinates0,
-                                                                  int                                                   nCenterCoordinates0,
-                                                                  double                                                volume,
-                                                                  const Marmot::Meshfree::MarmotMeshfreeApproximation&  approximation )
+  GenericSmallStrainParticle< nDim >::GenericSmallStrainParticle(
+    int                                                  elementID,
+    const double*                                        centerCoordinates0,
+    int                                                  nCenterCoordinates0,
+    double                                               volume,
+    const Marmot::Meshfree::MarmotMeshfreeApproximation& approximation )
     : _centerCoordinatesUndeformed( Eigen::Map< const Eigen::Matrix< double, nDim, 1 > >( centerCoordinates0 ) ),
       _volUndeformed( volume ),
       _meshfreeApproximation( approximation ),
@@ -273,5 +278,5 @@ on is small enough
     }
     this->setVCIOrder( _vciOrder );
   }
-      
+
 } // namespace Marmot::Meshfree
