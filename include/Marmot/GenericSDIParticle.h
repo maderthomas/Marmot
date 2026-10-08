@@ -35,8 +35,8 @@
 #include <Eigen/Dense>
 #include <Fastor/Fastor.h>
 #include <stdexcept>
-#include <vector> // Explicitly include vector for clarity
 #include <tuple>  // Explicitly include tuple for std::tuple usage
+#include <vector> // Explicitly include vector for clarity
 
 namespace Marmot::Meshfree {
 
@@ -122,10 +122,9 @@ namespace Marmot::Meshfree {
       const std::vector< std::string > propertyNames = getPropertyNames();
 
       if ( nProperties != static_cast< int >( propertyNames.size() ) )
-        throw std::invalid_argument( "GenericSDIParticle::setProperties: number of properties (" +
-                                     std::to_string( nProperties ) +
-                                     ") does not match number of supported properties (" +
-                                     std::to_string( propertyNames.size() ) + ")." );
+        throw std::invalid_argument(
+          "GenericSDIParticle::setProperties: number of properties (" + std::to_string( nProperties ) +
+          ") does not match number of supported properties (" + std::to_string( propertyNames.size() ) + ")." );
 
       for ( int i = 0; i < nProperties; ++i )
         setProperty( propertyNames[i], &properties[i] );

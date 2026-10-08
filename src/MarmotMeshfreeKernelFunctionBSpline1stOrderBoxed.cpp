@@ -48,7 +48,7 @@ namespace Marmot::Meshfree {
   double MarmotMeshfreeKernelFunctionBSpline1stOrderBoxed::computeBSpline1stOrder( double coord_minus_center ) const
   {
     const double z = std::abs( coord_minus_center ) / _supportRadius;
-    if ( z < 1.0){
+    if ( z < 1.0 ) {
       return 1.0 - z;
     }
 
@@ -61,7 +61,7 @@ namespace Marmot::Meshfree {
     const double z         = std::abs( coord_minus_center ) / _supportRadius;
     const double dz_dcoord = coord_minus_center > 0 ? 1.0 / _supportRadius : -1.0 / _supportRadius;
 
-    return (z < 1.0 && z > 0.0) ? dz_dcoord * -1.0 : 0;
+    return ( z < 1.0 && z > 0.0 ) ? dz_dcoord * -1.0 : 0;
   }
 
   const double* MarmotMeshfreeKernelFunctionBSpline1stOrderBoxed::getCenterCoordinates() const

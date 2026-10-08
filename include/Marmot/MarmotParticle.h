@@ -83,8 +83,8 @@ namespace Marmot::Meshfree {
       const std::vector< const MarmotMeshfreeKernelFunction* >& kernelFunctions ) = 0;
 
     virtual void assignMeshfreeKernelFunctions(
-        const std::vector< const MarmotMeshfreeKernelFunction* >& kernelFunctionsU,
-        const std::vector< const MarmotMeshfreeKernelFunction* >& kernelFunctionsPJ )
+      const std::vector< const MarmotMeshfreeKernelFunction* >& kernelFunctionsU,
+      const std::vector< const MarmotMeshfreeKernelFunction* >& kernelFunctionsPJ )
     {
       this->assignMeshfreeKernelFunctions( kernelFunctionsU );
     }

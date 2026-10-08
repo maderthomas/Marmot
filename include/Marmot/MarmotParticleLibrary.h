@@ -54,16 +54,16 @@ namespace MarmotLibrary {
 
                                              const Marmot::Meshfree::MarmotMeshfreeApproximation& approximation );
 
-    using mixedParticleFactoryFunction = Marmot::Meshfree::MarmotParticle* (*)(
-      int, 
-      const double*, 
-      int, 
-      double, 
-      const std::string&, 
-      const double*, 
-      int, 
-      const Marmot::Meshfree::MarmotMeshfreeApproximation&, 
-      const Marmot::Meshfree::MarmotMeshfreeApproximation&);
+    using mixedParticleFactoryFunction =
+      Marmot::Meshfree::MarmotParticle* (*)( int,
+                                             const double*,
+                                             int,
+                                             double,
+                                             const std::string&,
+                                             const double*,
+                                             int,
+                                             const Marmot::Meshfree::MarmotMeshfreeApproximation&,
+                                             const Marmot::Meshfree::MarmotMeshfreeApproximation& );
 
     MarmotParticleFactory() = delete;
 
@@ -93,7 +93,7 @@ namespace MarmotLibrary {
       const double*      materialProperties,
       int                nMaterialProperties,
 
-      const Marmot::Meshfree::MarmotMeshfreeApproximation& approximationU ,
+      const Marmot::Meshfree::MarmotMeshfreeApproximation& approximationU,
       const Marmot::Meshfree::MarmotMeshfreeApproximation& approximationPJ );
 
     static bool registerParticle( const std::string& particleName, particleFactoryFunction factoryFunction );
@@ -102,7 +102,7 @@ namespace MarmotLibrary {
   private:
     bool checkIfParticleIsRegistered( const std::string& particleName );
 
-    static std::unordered_map< std::string, particleFactoryFunction > particleFactoryFunctionByName;
+    static std::unordered_map< std::string, particleFactoryFunction >      particleFactoryFunctionByName;
     static std::unordered_map< std::string, mixedParticleFactoryFunction > mixedParticleFactoryFunctionByName;
   };
 

@@ -48,8 +48,6 @@ namespace MarmotLibrary {
   std::unordered_map< std::string, MarmotParticleFactory::mixedParticleFactoryFunction >
     MarmotParticleFactory::mixedParticleFactoryFunctionByName;
 
-
-
   bool MarmotParticleFactory::registerParticle( const std::string&      particleName,
                                                 particleFactoryFunction factoryFunction )
   {
@@ -63,13 +61,14 @@ namespace MarmotLibrary {
     return true;
   }
 
-  bool MarmotParticleFactory::registerParticle( const std::string&      particleName,
-                                                     mixedParticleFactoryFunction factoryFunction )
+  bool MarmotParticleFactory::registerParticle( const std::string&           particleName,
+                                                mixedParticleFactoryFunction factoryFunction )
   {
 
     const auto particleNameUpperCase = makeStringUpperCase_( particleName );
 
-    assert( mixedParticleFactoryFunctionByName.find( particleNameUpperCase ) == mixedParticleFactoryFunctionByName.end() );
+    assert( mixedParticleFactoryFunctionByName.find( particleNameUpperCase ) ==
+            mixedParticleFactoryFunctionByName.end() );
 
     mixedParticleFactoryFunctionByName[particleNameUpperCase] = factoryFunction;
 
@@ -122,14 +121,14 @@ namespace MarmotLibrary {
 
     try {
       return mixedParticleFactoryFunctionByName.at( particleNameUpperCase )( particleNumber,
-                                                                        vertexCoordinates,
-                                                                        sizeVertexCoordinates,
-                                                                        volume,
-                                                                        materialName,
-                                                                        materialProperties,
-                                                                        sizeMaterialProperties,
-                                                                        approximationU,
-                                                                        approximationPJ );
+                                                                             vertexCoordinates,
+                                                                             sizeVertexCoordinates,
+                                                                             volume,
+                                                                             materialName,
+                                                                             materialProperties,
+                                                                             sizeMaterialProperties,
+                                                                             approximationU,
+                                                                             approximationPJ );
     }
     catch ( const std::out_of_range& e ) {
       throw std::invalid_argument( MakeString() << "Invalid particle " << particleName << " requested!" );
