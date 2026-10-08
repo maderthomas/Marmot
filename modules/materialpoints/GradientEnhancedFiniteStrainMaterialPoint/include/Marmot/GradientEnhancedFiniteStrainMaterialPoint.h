@@ -379,6 +379,10 @@ namespace Marmot::MaterialPoints {
                                                ///< minus the value stored in the state variable `local damage`
                                                ///< (which is then overwritten by the new value)
       double nonLocalRadius;                   ///< nonlocal radius @f$ R @f$ of the material, @f$ c = R^2 @f$
+      /// optional anisotropic gradient tensor @f$ \boldsymbol{L}_0 @f$ of the nonlocal balance (reference
+      /// configuration); replaces @f$ R^2 \boldsymbol{I} @f$ in the cells and particles only if #hasGradientTensor
+      Fastor::Tensor< double, nDim, nDim > gradientTensor;
+      bool                                 hasGradientTensor; ///< whether the material provides #gradientTensor
     } response;
 
     /// @brief Algorithmic tangents of the last computeYourself(), with respect to @f$ \Delta\boldsymbol{F} @f$ and
