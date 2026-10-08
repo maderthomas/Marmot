@@ -352,9 +352,15 @@ namespace Marmot::Elements {
           using Tensor33d = Fastor::Tensor< double, 3, 3 >;
 
           const Eigen::Map< const CoordinateArray > U( QTotal_ );
-          const VectorDim                           g      = ( coordinates + U ) * ( qp.dNdS.transpose() );
-          const double                              lambda = g.norm(); // dN/dS -> stretch directly
-          const VectorDim                           n      = g / lambda;
+          // the stretch from the reference tangent G and its change w = dU/dS, with lambda - 1 free of cancellation:
+          // exactly zero without displacement, for any orientation of the truss
+          const VectorDim G              = qp.T;
+          const VectorDim w              = U * qp.dNdS.transpose();
+          const VectorDim g              = G + w;
+          const double    gNorm          = g.norm();
+          const double    lambdaMinusOne = ( 2.0 * G.dot( w ) + w.dot( w ) ) / ( 1.0 + gNorm );
+          const double    lambda         = 1.0 + lambdaMinusOne;
+          const VectorDim n              = g / gNorm;
 
           Material::Deformation< 3 > deformation{ Tensor33d( 0.0 ) };
           deformation.F( 0, 0 ) = lambda;
@@ -380,7 +386,7 @@ namespace Marmot::Elements {
           sv.lateralStretches << deformation.F( 1, 1 ), deformation.F( 2, 2 );
           sv.kirchhoffStress = Eigen::Map< const Eigen::Matrix3d >( response.tau.data() );
           sv.stress          = tau / J;
-          sv.strain          = std::log( lambda );
+          sv.strain          = std::log1p( lambdaMinusOne );
           sv.normalForce     = P * elementProperties[0];
           sv.elasticEnergy   = response.elasticEnergyDensity * qp.A0xW;
           sv.dissipation     = response.dissipation * qp.A0xW;

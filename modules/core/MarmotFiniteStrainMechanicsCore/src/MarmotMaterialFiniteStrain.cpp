@@ -92,6 +92,7 @@ void MarmotMaterialFiniteStrain::computeUniaxialStress( ConstitutiveResponse< 3 
   AlgorithmicModuli< 3 > tangents;
   Eigen::Matrix2d        dTauLateral_dFLateral;
 
+  bool finalEvaluation = false;
   for ( int iteration = 0;; iteration++ ) {
 
     // every evaluation starts from the beginning of the increment, a path dependent material must not see the
@@ -104,6 +105,9 @@ void MarmotMaterialFiniteStrain::computeUniaxialStress( ConstitutiveResponse< 3 
     const auto& C = tangents.dTau_dF;
     dTauLateral_dFLateral << C( 1, 1, 1, 1 ), C( 1, 1, 2, 2 ), C( 2, 2, 1, 1 ), C( 2, 2, 2, 2 );
 
+    if ( finalEvaluation )
+      break;
+
     const Eigen::Vector2d residual( response.tau( 1, 1 ), response.tau( 2, 2 ) );
 
     const auto            solver     = dTauLateral_dFLateral.fullPivLu();
@@ -113,8 +117,15 @@ void MarmotMaterialFiniteStrain::computeUniaxialStress( ConstitutiveResponse< 3 
       throw StressUpdateFailed( MakeString() << __PRETTY_FUNCTION__
                                              << ": singular lateral tangent in the uniaxial stress iteration" );
 
-    if ( correction.norm() <= tolerance )
-      break;
+    if ( correction.norm() <= tolerance ) {
+      // apply the last (tiny) correction and evaluate once more: with the quadratic convergence of Newton's method,
+      // the remaining lateral stress is then at round-off level; returning the state before the correction would
+      // leave lateral stresses of (stiffness x tolerance), i.e., noise in the axial stress
+      deformation.F( 1, 1 ) += correction( 0 );
+      deformation.F( 2, 2 ) += correction( 1 );
+      finalEvaluation = true;
+      continue;
+    }
 
     if ( iteration >= maxIterations ) {
       MarmotJournal::warningToMSG( "UniaxialStress (finite strain) requires cutback" );
