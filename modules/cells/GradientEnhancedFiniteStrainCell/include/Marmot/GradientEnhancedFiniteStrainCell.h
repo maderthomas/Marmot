@@ -472,12 +472,20 @@ namespace Marmot::Cells {
       const auto dL_dqU = evaluate( + einsum< kl,   lB >( t.dL_dDeltaF, dN_dY ) );
 
       r_U  += ( + einsum< iA, ij >( dN_dx, S )                                                          ) * V0;
-      r_N  += ( N * dNonLocalField + c * einsum< iA, iB, B >( dN_dX, dN_dX, dQN ) - N * dLocalField    ) * V0;
+      if ( mp->response.hasGradientTensor ) // anisotropic implicit gradient, L0 in the reference configuration
+        r_N += ( N * dNonLocalField + einsum< iA, ij, jB, B >( dN_dX, mp->response.gradientTensor, dN_dX, dQN ) - N * dLocalField ) * V0;
+      else
+        r_N  += ( N * dNonLocalField + c * einsum< iA, iB, B >( dN_dX, dN_dX, dQN ) - N * dLocalField    ) * V0;
       // clang-format on
 
       const auto SdN_dx  = evaluate( einsum< ij, iB >( S, dN_dx ) );       // S_ij dN_B/dx_i
       const auto dSdN_dx = evaluate( einsum< ij, iA >( t.dS_dN, dN_dx ) ); // dS_ij/dN dN_A/dx_i
-      const auto dNdN_dX = evaluate( einsum< iA, iB >( dN_dX, dN_dX ) );   // dN_A/dX_i dN_B/dX_i
+      // c dN_A/dX_i dN_B/dX_i, or dN_A/dX_i L0_ij dN_B/dX_j with the optional anisotropic gradient tensor L0
+      const Tensor< double, nNodes, nNodes > cdNdN_dX = mp->response.hasGradientTensor
+                                                          ? evaluate( einsum< iA, ij, jB >( dN_dX,
+                                                                                            mp->response.gradientTensor,
+                                                                                            dN_dX ) )
+                                                          : evaluate( c * einsum< iA, iB >( dN_dX, dN_dX ) );
 
       for ( int A = 0; A < nNodes; A++ ) {
         for ( int j = 0; j < nDim; j++ ) {
@@ -499,8 +507,8 @@ namespace Marmot::Cells {
           // K_NU: - N_A dL/dq_Bk V0
           for ( int k = 0; k < nDim; k++ )
             K( rowN, idxU + B * nDim + k ) -= N( A ) * dL_dqU( k, B ) * V0;
-          // K_NN: ( N_A N_B ( 1 - dL/dN ) + c dN_A/dX_i dN_B/dX_i ) V0
-          K( rowN, idxN + B ) += ( N( A ) * N( B ) * ( 1. - t.dL_dN ) + c * dNdN_dX( A, B ) ) * V0;
+          // K_NN: ( N_A N_B ( 1 - dL/dN ) + c dN_A/dX_i dN_B/dX_i ) V0 (or with L0, see above)
+          K( rowN, idxN + B ) += ( N( A ) * N( B ) * ( 1. - t.dL_dN ) + cdNdN_dX( A, B ) ) * V0;
         }
       }
     }
