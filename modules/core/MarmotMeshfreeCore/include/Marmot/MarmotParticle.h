@@ -217,6 +217,11 @@ namespace Marmot::Meshfree {
                                         double        timeNew,
                                         double        dT ) = 0;
 
+    /// Assign the current TOTAL nodal solution (same dof layout as dQ in computePhysicsKernels).
+    /// Called by the host before computePhysicsKernels, once per iteration.
+    /// Default: ignored. Particles may use it, e.g., for total-field stabilization terms.
+    virtual void assignTotalNodalSolution( const double* qTotal, int nDof ){};
+
     /**
      * @brief Compute a body load and its derivative with respect to the dof increment.
      * @param[in] type Load type, a value of getSupportedBodyLoadTypes().
