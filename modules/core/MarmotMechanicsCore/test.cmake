@@ -63,3 +63,6 @@ add_marmot_test("TestMarmotTesting" "${CURR_TEST_SOURCE_DIR}/TestMarmotTesting.c
 
 # Tests for MarmotInterfaceMaterialHypoElastic
 add_marmot_test("TestMarmotInterfaceMaterialHypoElastic" "${CURR_TEST_SOURCE_DIR}/TestMarmotInterfaceMaterialHypoElastic.cpp")
+
+# Tests for the beam stress reduction of MarmotMaterialHypoElastic
+add_marmot_test("TestMarmotMaterialHypoElasticBeamStress" "${CURR_TEST_SOURCE_DIR}/TestMarmotMaterialHypoElasticBeamStress.cpp" REQUIRES LinearElastic VonMises)

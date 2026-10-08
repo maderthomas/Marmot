@@ -29,16 +29,18 @@ namespace Marmot::Elements::Registration {
 
   using namespace MarmotLibrary;
 
-  template < int nDim >
+  template < int nDim, int nNodes >
   bool registerBeam( const std::string& name )
   {
     return MarmotElementFactory::registerElement( name, []( int elementID ) -> MarmotElement* {
-      return new BeamElement< nDim >( elementID );
+      return new BeamElement< nDim, nNodes >( elementID );
     } );
   }
 
-  // two-node Euler-Bernoulli beams (cubic transverse interpolation), named as in Abaqus
-  const static bool B23_isRegistered = registerBeam< 2 >( "B23" );
-  const static bool B33_isRegistered = registerBeam< 3 >( "B33" );
+  // Euler-Bernoulli beams BE<nDim>D<nNodes>: 2 nodes (cubic Hermite), 3 nodes (quintic Hermite; end, end, mid)
+  const static bool BE2D2_isRegistered = registerBeam< 2, 2 >( "BE2D2" );
+  const static bool BE2D3_isRegistered = registerBeam< 2, 3 >( "BE2D3" );
+  const static bool BE3D2_isRegistered = registerBeam< 3, 2 >( "BE3D2" );
+  const static bool BE3D3_isRegistered = registerBeam< 3, 3 >( "BE3D3" );
 
 } // namespace Marmot::Elements::Registration

@@ -23,20 +23,14 @@
  * ---------------------------------------------------------------------
  */
 #pragma once
+#include "Marmot/BeamFiberSection.h"
 #include "Marmot/MarmotElement.h"
 #include "Marmot/MarmotElementProperty.h"
 #include "Marmot/MarmotExceptions.h"
 #include "Marmot/MarmotFiniteElement.h"
-#include "Marmot/MarmotJournal.h"
-#include "Marmot/MarmotMaterialHypoElastic.h"
-#include "Marmot/MarmotMaterialHypoElasticFactory.h"
-#include "Marmot/MarmotStateVarVectorManager.h"
 #include <Eigen/Dense>
-#include <algorithm>
 #include <array>
 #include <cmath>
-#include <memory>
-#include <numbers>
 #include <string>
 #include <vector>
 
@@ -44,112 +38,93 @@ namespace Marmot::Elements {
 
   /**
    * @class Marmot::Elements::BeamElement
-   * @brief Two-node Euler-Bernoulli beam (frame) element in two or three spatial dimensions, geometrically linear,
-   * with a fiber section for any hypoelastic material of Marmot.
+   * @brief Euler-Bernoulli beam (frame) element in two or three spatial dimensions with 2 or 3 nodes, geometrically
+   * linear, with a fiber section (BeamFiberSection) for any hypoelastic material of Marmot.
    *
-   * @tparam nDim number of spatial dimensions: 2 (nodal dofs \f$u_x, u_y, \theta_z\f$) or 3 (nodal dofs
-   *              \f$u_x, u_y, u_z, \theta_x, \theta_y, \theta_z\f$)
+   * @tparam nDim   number of spatial dimensions: 2 (nodal dofs \f$u_x, u_y, \theta_z\f$) or 3 (nodal dofs
+   *                \f$u_x, u_y, u_z, \theta_x, \theta_y, \theta_z\f$)
+   * @tparam nNodes 2 (linear) or 3 (quadratic; node order end, end, mid as Bar3; the mid node must lie at the middle
+   *                of the straight beam)
    *
    * Node fields: @b displacement and @b rotation (2D: one rotation about the out-of-plane axis; 3D: the rotation
    * vector). The dofs are ordered node by node, displacement before rotation.
    *
    * @par Kinematics
    * In the local frame \f$( \boldsymbol{e}_1, \boldsymbol{e}_2, \boldsymbol{e}_3 )\f$ (\f$\boldsymbol{e}_1\f$ along
-   * the axis from node 1 to node 2, local coordinates \f$( x, y, z )\f$ with \f$y, z\f$ in the cross section) the
-   * axial displacement \f$u\f$ and the twist \f$\varphi\f$ are interpolated linearly, the transverse displacements
-   * \f$v, w\f$ by cubic Hermite polynomials together with the nodal rotations \f$\theta_z = v'\f$ and
-   * \f$\theta_y = - w'\f$ (Euler-Bernoulli: no shear deformation, hence no shear locking). The generalized strains are
-   * the axial strain \f$\varepsilon_0 = u'\f$, the curvatures \f$\kappa_y = \theta_y' = -w''\f$,
-   * \f$\kappa_z = \theta_z' = v''\f$ and the rate of twist \f$\chi = \varphi'\f$; in 2D only \f$\varepsilon_0\f$ and
-   * \f$\kappa = \kappa_z\f$. The element reproduces the exact nodal displacements and rotations of a linear elastic
-   * beam loaded at its nodes (e.g., a cantilever under a tip force or moment with a single element).
+   * the axis from node 1 to node 2, section coordinates \f$y, z\f$) the axial displacement \f$u\f$ and the twist
+   * \f$\varphi\f$ are interpolated by the Lagrange polynomials of the nodes (linear or quadratic), the transverse
+   * displacements \f$v, w\f$ by the Hermite polynomials of the nodal values and the nodal rotations
+   * \f$\theta_z = v'\f$ and \f$\theta_y = - w'\f$ (cubic for 2 nodes, quintic for 3 nodes; Euler-Bernoulli: no shear
+   * deformation, no shear locking). The generalized strains are \f$\varepsilon_0 = u'\f$, \f$\kappa_y = -w''\f$,
+   * \f$\kappa_z = v''\f$ and \f$\chi = \varphi'\f$ (2D: \f$\varepsilon_0\f$ and \f$\kappa = \kappa_z\f$). For a linear
+   * elastic material, the 2-node element reproduces the exact nodal values of a beam loaded at its nodes, the 3-node
+   * element also the exact deflection of a beam under a uniform line load (quartic).
    *
-   * Geometrically linear: rotations must remain small (a rigid body rotation of finite size strains the element).
+   * Integration along the axis (full, exact for elastic beams): 3 Gauss points (2 nodes), 4 Gauss points (3 nodes).
    *
-   * @par Fiber section
-   * The section is integrated with fibers at \f$( y_f, z_f )\f$ with areas \f$A_f\f$. A fiber has the axial strain
-   * \f$\varepsilon_{11} = \varepsilon_0 + z_f \kappa_y - y_f \kappa_z\f$ and, in 3D, the torsional shear strains
-   * \f$\gamma_{12} = - s z_f \chi\f$, \f$\gamma_{13} = s y_f \chi\f$; its material is evaluated in the stress state
-   * \f$\sigma_{22} = \sigma_{33} = \sigma_{23} = 0\f$ (Newton iteration on the free strains, condensed tangent). The
-   * section forces \f$( N, M_y, M_z, T )\f$ are the work conjugates of \f$( \varepsilon_0, \kappa_y, \kappa_z, \chi
-   * )\f$. The fiber coordinates are scaled such that the fibers reproduce the given area and second moments of area
-   * exactly, and \f$s = \sqrt{ J / \sum_f ( y_f^2 + z_f^2 ) A_f }\f$ such that the torsional stiffness is exactly
-   * \f$G J\f$ for an elastic material. Hence, for a linear elastic material, \f$N = E A \varepsilon_0\f$,
-   * \f$M_y = E I_y \kappa_y\f$, \f$M_z = E I_z \kappa_z\f$, \f$T = G J \chi\f$ exactly, for any profile. Profiles:
+   * Geometrically linear: rotations must remain small. The section (BeamFiberSection) is independent of the
+   * kinematics, so a co-rotational variant only has to provide the generalized strains of its co-rotated frame and
+   * the corresponding (geometric) tangent.
    *
-   * - 0, @b generic: the fewest fibers reproducing \f$A, I\f$: 2 fibers at \f$y = \pm \sqrt{I/A}\f$ (2D) or 4 fibers
-   *   at \f$( \pm \sqrt{I_z/A}, \pm \sqrt{I_y/A} )\f$ (3D). Exact for elastic materials; for inelastic materials it
-   *   is an idealized sandwich section (full plastification at first yield).
-   * - 1, @b rectangle: a grid of \f$n\f$ (2D: layers through the height) or \f$n \times n\f$ (3D) fibers.
-   * - 2, @b circle: \f$\max( 1, n/2 )\f$ rings of equal area, each with \f$2n\f$ (rounded up to a multiple of 4)
-   *   sectors.
+   * @par Section and material
+   * Every integration point along the axis has its own BeamFiberSection; every fiber has
+   * its own material instance (created by name through the hypoelastic material factory from the
+   * MarmotMaterialSection) and state. 2D fibers are in uniaxial stress
+   * (MarmotMaterialHypoElastic::computeUniaxialStress), 3D fibers additionally carry the torsional shear strains
+   * (MarmotMaterialHypoElastic::computeBeamStress).
    *
-   * Element properties:
-   * - 2D: \f$[ A, I, \text{profile}, n ]\f$ with \f$I = \int y^2 \mathrm{d}A\f$ (bending in the plane).
-   * - 3D: \f$[ A, I_y, I_z, J, v_x, v_y, v_z, \text{profile}, n ]\f$ with \f$I_y = \int z^2 \mathrm{d}A\f$,
-   *   \f$I_z = \int y^2 \mathrm{d}A\f$, the torsion constant \f$J\f$, and the orientation vector \f$\boldsymbol{v}\f$
-   *   whose part normal to the axis is the local \f$y\f$ axis \f$\boldsymbol{e}_2\f$; \f$\boldsymbol{e}_3 =
-   *   \boldsymbol{e}_1 \times \boldsymbol{e}_2\f$.
+   * Element properties: the section is given by its integration points (any shape; the element knows no shapes):
+   * - 2D: \f$[ n, y_1, A_1, \dots, y_n, A_n ]\f$, \f$y\f$ in the plane, normal to the axis (\f$\boldsymbol{e}_2 =
+   *   \boldsymbol{e}_z \times \boldsymbol{e}_1\f$).
+   * - 3D: \f$[ v_x, v_y, v_z, J, n, y_1, z_1, A_1, \dots, y_n, z_n, A_n ]\f$ with the orientation vector
+   *   \f$\boldsymbol{v}\f$, whose part normal to the axis is the local \f$y\f$ axis \f$\boldsymbol{e}_2\f$
+   *   (\f$\boldsymbol{e}_3 = \boldsymbol{e}_1 \times \boldsymbol{e}_2\f$), and the torsion constant \f$J\f$.
    *
-   * profile and \f$n\f$ are optional (defaults: generic, \f$n = 8\f$). The section integration along the axis uses 3
-   * Gauss points (exact for an elastic beam). The material of all fibers is the same; it is a hypoelastic material
-   * (MarmotMaterialHypoElastic) of Marmot, which sees the characteristic length \f$L/3\f$.
+   * The section coordinates are measured from the beam axis (the line through the nodes): a section whose centroid is
+   * off the axis is an eccentric beam. The materials see the characteristic length \f$L/3\f$.
    *
    * Quadrature point states: 2D: @b normal force, @b bending moment, @b axial strain, @b curvature; 3D: @b normal
    * force, @b bending moments (\f$M_y, M_z\f$), @b torque, @b axial strain, @b curvatures (\f$\kappa_y, \kappa_z\f$),
-   * @b twist rate; both: @b section forces and @b section strains (all generalized forces or strains), @b elastic
-   * energy, @b dissipation (integrated over the quadrature point's volume). The state of fiber \f$k\f$ (stress
-   * \f$\sigma_{11}, \sigma_{12}, \sigma_{13}\f$, and the material states) is accessible as "fiber k stress" or "fiber
-   * k <material state name>".
+   * @b twist rate; both: @b section forces and @b section strains (all components), @b elastic energy, @b dissipation
+   * (integrated over the quadrature point's volume). The state of fiber \f$k\f$ is accessible as "fiber k stress"
+   * (\f$\sigma_{11}, \sigma_{12}, \sigma_{13}\f$) or "fiber k <material state name>".
    *
    * Not implemented: distributed (surface) loads, inertia.
    */
-  template < int nDim >
+  template < int nDim, int nNodes >
   class BeamElement : public MarmotElement {
 
     static_assert( nDim == 2 || nDim == 3, "BeamElement: nDim must be 2 or 3" );
+    static_assert( nNodes == 2 || nNodes == 3, "BeamElement: nNodes must be 2 or 3" );
 
   public:
-    /// The cross section profile, which determines the fiber layout
-    enum Profile {
-      Generic   = 0,
-      Rectangle = 1,
-      Circle    = 2,
-    };
+    using Section = BeamFiberSection< nDim >;
 
-    static constexpr int nNodes          = 2;
-    static constexpr int nRotations      = nDim == 2 ? 1 : 3;
-    static constexpr int nDofPerNode     = nDim + nRotations;
-    static constexpr int sizeLoadVector  = nNodes * nDofPerNode;
-    static constexpr int nGeneralized    = nDim == 2 ? 2 : 4; ///< generalized strains / section forces
-    static constexpr int nProperties     = nDim == 2 ? 2 : 7; ///< required element properties
-    static constexpr int nFiberStateVars = 5;                 ///< fiber stress (3), energy and dissipation density
+    static constexpr int nHermite       = 2 * nNodes; ///< transverse dofs (value and slope per node)
+    static constexpr int nRotations     = nDim == 2 ? 1 : 3;
+    static constexpr int nDofPerNode    = nDim + nRotations;
+    static constexpr int sizeLoadVector = nNodes * nDofPerNode;
+    static constexpr int nGeneralized   = Section::nGeneralized;
+    static constexpr int nHeader        = nDim == 2 ? 1 : 5; ///< properties before the section points
+    static constexpr int pointStride    = nDim == 2 ? 2 : 3; ///< properties per section point
 
     using VectorDim  = Eigen::Matrix< double, nDim, 1 >;
     using MatrixDim  = Eigen::Matrix< double, nDim, nDim >;
     using RhsSized   = Eigen::Matrix< double, sizeLoadVector, 1 >;
     using KSized     = Eigen::Matrix< double, sizeLoadVector, sizeLoadVector >;
     using BSized     = Eigen::Matrix< double, nGeneralized, sizeLoadVector >;
-    using VectorGen  = Eigen::Matrix< double, nGeneralized, 1 >;
-    using MatrixGen  = Eigen::Matrix< double, nGeneralized, nGeneralized >;
-    using FiberS     = Eigen::Matrix< double, 3, nGeneralized >; ///< generalized strains -> fiber strains
+    using VectorGen  = typename Section::VectorGen;
+    using MatrixGen  = typename Section::MatrixGen;
     using InterpSize = Eigen::Matrix< double, nDim, sizeLoadVector >;
 
-    /// A fiber of the cross section
-    struct Fiber {
-      double y;    ///< local y coordinate
-      double z;    ///< local z coordinate (0 in 2D)
-      double area; ///< area
-      FiberS S;    ///< generalized strains -> fiber strains [eps11, gamma12, gamma13]
-    };
-
-    /// A quadrature point along the axis
+    /// A quadrature point along the axis, with its own fiber section
     struct QuadraturePoint {
       const double xi;        ///< parent coordinate in [-1, 1]
       const double weight;    ///< Gauss weight
       BSized       B;         ///< generalized strains of the global dofs
       double       dV = 0.0;  ///< length x weight / 2
       double*      stateVars; ///< the state of this point
+      Section      section;   ///< the fibers with their materials
       QuadraturePoint( double xi, double weight ) : xi( xi ), weight( weight ), stateVars( nullptr ) {}
     };
 
@@ -167,14 +142,13 @@ namespace Marmot::Elements {
     MatrixDim R = MatrixDim::Identity();
     /// Global -> local dof transformation
     KSized T = KSized::Identity();
-    /// The fibers of the cross section
-    std::vector< Fiber > fibers;
-    /// The torsion scaling factor s of the fiber shear strains
-    double torsionScaling = 1.0;
-    /// The material, shared by all fibers (a hypoelastic material carries no state itself)
-    std::unique_ptr< MarmotMaterialHypoElastic > material;
     /// The quadrature points along the axis
     std::vector< QuadraturePoint > qps;
+
+    /// The material section, kept to create the fiber materials once the fibers exist
+    std::string   materialName;
+    const double* materialProperties  = nullptr;
+    int           nMaterialProperties = 0;
 
     /// The names of the per-point states and their lengths, see the class documentation
     static const std::vector< std::pair< std::string, int > >& qpStateEntries()
@@ -204,18 +178,61 @@ namespace Marmot::Elements {
     static constexpr int idxDissipation    = 2 * nGeneralized + 1;
     static constexpr int nQpStateVarsOwn   = 2 * nGeneralized + 2;
 
+    /// The parametric coordinates s in [0, 1] of the nodes (end, end, mid)
+    static constexpr std::array< double, 3 > nodeS = { 0.0, 1.0, 0.5 };
+
+    /// The coefficients of the Hermite polynomials in the monomials s^k: column 2a for the value at node a, column 2a+1
+    /// for the slope dv/ds at node a
+    Eigen::Matrix< double, nHermite, nHermite > hermiteCoefficients;
+
     explicit BeamElement( int elementID )
       : elLabel( elementID ), elementProperties( nullptr, 0 ), coordinates( nullptr )
     {
-      for ( const auto& qpInfo : FiniteElement::Quadrature::Spatial1D::gaussPointList3 )
-        qps.emplace_back( qpInfo.xi( 0 ), qpInfo.weight );
+      using namespace FiniteElement::Quadrature;
+      if constexpr ( nNodes == 2 ) {
+        for ( const auto& qpInfo : Spatial1D::gaussPointList3 )
+          qps.emplace_back( qpInfo.xi( 0 ), qpInfo.weight );
+      }
+      else {
+        // 4 point Gauss rule
+        const double a  = std::sqrt( 3. / 7 - 2. / 7 * std::sqrt( 6. / 5 ) ),
+                     b  = std::sqrt( 3. / 7 + 2. / 7 * std::sqrt( 6. / 5 ) );
+        const double wa = ( 18 + std::sqrt( 30. ) ) / 36, wb = ( 18 - std::sqrt( 30. ) ) / 36;
+        for ( const auto& [xi, w] :
+              std::array< std::pair< double, double >, 4 >{ { { -b, wb }, { -a, wa }, { a, wa }, { b, wb } } } )
+          qps.emplace_back( xi, w );
+      }
+
+      Eigen::Matrix< double, nHermite, nHermite > M = Eigen::Matrix< double, nHermite, nHermite >::Zero();
+      for ( int a = 0; a < nNodes; a++ )
+        for ( int k = 0; k < nHermite; k++ ) {
+          M( 2 * a, k )     = std::pow( nodeS[a], k );
+          M( 2 * a + 1, k ) = k == 0 ? 0.0 : k * std::pow( nodeS[a], k - 1 );
+        }
+      hermiteCoefficients = M.inverse();
     }
 
-    int nMaterialStateVars() const { return material ? material->getNumberOfRequiredStateVars() : 0; }
+    /// The Hermite polynomials (row) or their second derivative w.r.t. s at s, ordered as the columns of
+    /// hermiteCoefficients
+    Eigen::Matrix< double, 1, nHermite > hermite( double s, int derivative ) const
+    {
+      Eigen::Matrix< double, 1, nHermite > monomials = Eigen::Matrix< double, 1, nHermite >::Zero();
+      for ( int k = derivative; k < nHermite; k++ )
+        monomials( k ) = ( derivative == 0 ? 1.0 : k * ( k - 1 ) ) * std::pow( s, k - derivative );
+      return monomials * hermiteCoefficients;
+    }
 
-    int nFiberStride() const { return nFiberStateVars + nMaterialStateVars(); }
+    /// The Lagrange shape functions and their derivatives w.r.t. s at s (node order end, end, mid)
+    static std::pair< Eigen::Matrix< double, 1, nNodes >, Eigen::Matrix< double, 1, nNodes > > lagrange( double s )
+    {
+      const double xi = 2 * s - 1;
+      if constexpr ( nNodes == 2 )
+        return { FiniteElement::Spatial1D::Bar2::N( xi ), 2 * FiniteElement::Spatial1D::Bar2::dNdXi( xi ) };
+      else
+        return { FiniteElement::Spatial1D::Bar3::N( xi ), 2 * FiniteElement::Spatial1D::Bar3::dNdXi( xi ) };
+    }
 
-    int nQpStateVars() const { return nQpStateVarsOwn + static_cast< int >( fibers.size() ) * nFiberStride(); }
+    int nQpStateVars() const { return nQpStateVarsOwn + qps[0].section.getNumberOfRequiredStateVars(); }
 
     int getNumberOfRequiredStateVars() override { return static_cast< int >( qps.size() ) * nQpStateVars(); }
 
@@ -238,7 +255,7 @@ namespace Marmot::Elements {
 
     int getNDofPerElement() override { return sizeLoadVector; }
 
-    std::string getElementShape() override { return "bar2"; }
+    std::string getElementShape() override { return nNodes == 2 ? "bar2" : "bar3"; }
 
     void assignStateVars( double* stateVars, int nStateVars ) override
     {
@@ -250,21 +267,36 @@ namespace Marmot::Elements {
 
     void assignProperty( const ElementProperties& property ) override
     {
-      if ( property.nElementProperties < nProperties )
-        throw std::invalid_argument( MakeString() << __PRETTY_FUNCTION__ << ": a beam element in " << nDim
-                                                  << "D requires " << nProperties << " section properties" );
+      const int n = property.nElementProperties >= nHeader
+                      ? static_cast< int >( property.elementProperties[nHeader - 1] )
+                      : -1;
+      if ( n < 1 || property.nElementProperties != nHeader + pointStride * n )
+        throw std::invalid_argument(
+          MakeString() << __PRETTY_FUNCTION__ << ": element " << elLabel << ": the properties of a beam in " << nDim
+                       << "D are " << ( nDim == 2 ? "[n, y_1, A_1, ...]" : "[vx, vy, vz, J, n, y_1, z_1, A_1, ...]" ) );
       new ( &elementProperties )
         Eigen::Map< const Eigen::VectorXd >( property.elementProperties, property.nElementProperties );
     }
 
     void assignProperty( const MarmotMaterialSection& section ) override
     {
-      material = std::unique_ptr< MarmotMaterialHypoElastic >(
-        MarmotLibrary::MarmotMaterialHypoElasticFactory::createMaterial( section.materialName,
-                                                                         section.materialProperties,
-                                                                         section.nMaterialProperties,
-                                                                         elLabel ) );
-      material->setCharacteristicElementLength( length / static_cast< double >( qps.size() ) );
+      materialName        = section.materialName;
+      materialProperties  = section.materialProperties;
+      nMaterialProperties = section.nMaterialProperties;
+      createMaterials();
+    }
+
+    /// one material per fiber, as soon as both the fibers (initializeYourself) and the material section are known
+    void createMaterials()
+    {
+      if ( materialName.empty() || qps[0].section.fibers.empty() )
+        return;
+      for ( auto& qp : qps )
+        qp.section.createMaterials( materialName,
+                                    materialProperties,
+                                    nMaterialProperties,
+                                    elLabel,
+                                    length / static_cast< double >( qps.size() ) );
     }
 
     void assignNodeCoordinates( const double* coords ) override
@@ -272,144 +304,57 @@ namespace Marmot::Elements {
       new ( &coordinates ) Eigen::Map< const Eigen::Matrix< double, nDim, nNodes > >( coords );
     }
 
-    /// The section properties [A, Iy, Iz, J] (2D: Iy = J = 0, Iz = I)
-    std::array< double, 4 > sectionProperties() const
-    {
-      if constexpr ( nDim == 2 )
-        return { elementProperties[0], 0.0, elementProperties[1], 0.0 };
-      else
-        return { elementProperties[0], elementProperties[1], elementProperties[2], elementProperties[3] };
-    }
+    /// The number of section points
+    int nSectionPoints() const { return static_cast< int >( elementProperties[nHeader - 1] ); }
 
-    int profile() const
-    {
-      return elementProperties.size() > nProperties ? static_cast< int >( elementProperties[nProperties] ) : Generic;
-    }
-
-    int nFibersPerDirection() const
-    {
-      return elementProperties.size() > nProperties + 1 ? static_cast< int >( elementProperties[nProperties + 1] ) : 8;
-    }
-
-    /// The fibers of the profile, scaled to the area and the second moments of area
-    void makeFibers()
-    {
-      const auto [A, Iy, Iz, J] = sectionProperties();
-      if ( A <= 0 || Iz <= 0 || ( nDim == 3 && ( Iy <= 0 || J <= 0 ) ) )
-        throw std::invalid_argument( MakeString() << __PRETTY_FUNCTION__ << ": element " << elLabel
-                                                  << ": the section properties must be positive" );
-
-      std::vector< std::array< double, 3 > > raw; // y, z, relative area
-      const int                              n = nFibersPerDirection();
-      switch ( profile() ) {
-      case Generic: {
-        if constexpr ( nDim == 2 )
-          raw = { { -1, 0, 1 }, { 1, 0, 1 } };
-        else
-          raw = { { -1, -1, 1 }, { 1, -1, 1 }, { 1, 1, 1 }, { -1, 1, 1 } };
-        break;
-      }
-      case Rectangle: {
-        if ( n < 2 )
-          throw std::invalid_argument( MakeString() << __PRETTY_FUNCTION__ << ": a rectangle needs n >= 2 fibers" );
-        for ( int i = 0; i < n; i++ )
-          for ( int j = 0; j < ( nDim == 2 ? 1 : n ); j++ )
-            raw.push_back( { ( i + 0.5 ) / n - 0.5, nDim == 2 ? 0.0 : ( j + 0.5 ) / n - 0.5, 1.0 } );
-        break;
-      }
-      case Circle: {
-        if ( n < 2 )
-          throw std::invalid_argument( MakeString() << __PRETTY_FUNCTION__ << ": a circle needs n >= 2" );
-        const int nRings   = std::max( 1, n / 2 );
-        const int nSectors = 4 * ( ( 2 * n + 3 ) / 4 );
-        for ( int r = 0; r < nRings; r++ ) {
-          // rings of equal area, fibers at the ring's centroidal radius
-          const double ri = std::sqrt( static_cast< double >( r ) / nRings );
-          const double ro = std::sqrt( static_cast< double >( r + 1 ) / nRings );
-          const double rc = 2. / 3. * ( ro * ro * ro - ri * ri * ri ) / ( ro * ro - ri * ri );
-          for ( int s = 0; s < nSectors; s++ ) {
-            const double phi = ( s + 0.5 ) * 2 * std::numbers::pi / nSectors;
-            raw.push_back( { rc * std::cos( phi ), nDim == 2 ? 0.0 : rc * std::sin( phi ), 1.0 } );
-          }
-        }
-        break;
-      }
-      default: throw std::invalid_argument( MakeString() << __PRETTY_FUNCTION__ << ": unknown profile " << profile() );
-      }
-
-      double sumA = 0, sumYY = 0, sumZZ = 0;
-      for ( const auto& f : raw ) {
-        sumA += f[2];
-        sumYY += f[0] * f[0] * f[2];
-        sumZZ += f[1] * f[1] * f[2];
-      }
-      // scale the areas to A and the coordinates to Iz = sum y^2 A_f and Iy = sum z^2 A_f
-      const double scaleY = std::sqrt( Iz / A * sumA / sumYY );
-      const double scaleZ = nDim == 2 ? 0.0 : std::sqrt( Iy / A * sumA / sumZZ );
-
-      fibers.clear();
-      double polar = 0;
-      for ( const auto& f : raw ) {
-        Fiber fiber{ f[0] * scaleY, f[1] * scaleZ, f[2] / sumA * A, FiberS::Zero() };
-        polar += ( fiber.y * fiber.y + fiber.z * fiber.z ) * fiber.area;
-        fibers.push_back( fiber );
-      }
-      torsionScaling = nDim == 2 ? 0.0 : std::sqrt( J / polar );
-
-      for ( auto& f : fibers ) {
-        if constexpr ( nDim == 2 )
-          f.S << 1, -f.y, //
-            0, 0,         //
-            0, 0;
-        else
-          f.S << 1, f.z, -f.y, 0,           //
-            0, 0, 0, -torsionScaling * f.z, //
-            0, 0, 0, torsionScaling * f.y;
-      }
-    }
+    /// The cross section area (the sum of the areas of the section points)
+    double area() const { return qps[0].section.integrals()[0]; }
 
     /// The local displacements [u, v(, w)] at the parent coordinate xi in terms of the global dofs
     InterpSize displacementInterpolation( double xi ) const
     {
-      const double s  = 0.5 * ( xi + 1 );
-      const double L  = length;
-      const double H1 = 1 - 3 * s * s + 2 * s * s * s, H2 = L * ( s - 2 * s * s + s * s * s );
-      const double H3 = 3 * s * s - 2 * s * s * s, H4 = L * ( -s * s + s * s * s );
+      const double s                               = 0.5 * ( xi + 1 );
+      const auto [N, dNds]                         = lagrange( s );
+      const Eigen::Matrix< double, 1, nHermite > H = hermite( s, 0 );
 
-      Eigen::Matrix< double, nDim, sizeLoadVector > N  = Eigen::Matrix< double, nDim, sizeLoadVector >::Zero();
-      constexpr int                                 n2 = nDofPerNode;
-      N( 0, 0 )                                        = 1 - s;
-      N( 0, n2 )                                       = s;
-      if constexpr ( nDim == 2 ) {
-        N( 1, 1 ) = H1, N( 1, 2 ) = H2, N( 1, n2 + 1 ) = H3, N( 1, n2 + 2 ) = H4;
+      InterpSize N_ = InterpSize::Zero();
+      for ( int a = 0; a < nNodes; a++ ) {
+        const int    i  = a * nDofPerNode;
+        const double Hv = H( 2 * a ), Ht = length * H( 2 * a + 1 ); // the slope dof is dv/dx = dv/ds / L
+        N_( 0, i ) = N( a );
+        if constexpr ( nDim == 2 ) {
+          N_( 1, i + 1 ) = Hv, N_( 1, i + 2 ) = Ht;
+        }
+        else {
+          N_( 1, i + 1 ) = Hv, N_( 1, i + 5 ) = Ht;  // v with theta_z = v'
+          N_( 2, i + 2 ) = Hv, N_( 2, i + 4 ) = -Ht; // w with theta_y = -w'
+        }
       }
-      else {
-        N( 1, 1 ) = H1, N( 1, 5 ) = H2, N( 1, n2 + 1 ) = H3, N( 1, n2 + 5 ) = H4;   // v with theta_z
-        N( 2, 2 ) = H1, N( 2, 4 ) = -H2, N( 2, n2 + 2 ) = H3, N( 2, n2 + 4 ) = -H4; // w with theta_y = -w'
-      }
-      return N * T;
+      return N_ * T;
     }
 
     /// The generalized strains at the parent coordinate xi in terms of the global dofs
     BSized strainOperator( double xi ) const
     {
-      const double s = 0.5 * ( xi + 1 );
-      const double L = length;
-      // second derivatives of the Hermite polynomials w.r.t. x
-      const double d1 = ( -6 + 12 * s ) / ( L * L ), d2 = ( -4 + 6 * s ) / L;
-      const double d3 = ( 6 - 12 * s ) / ( L * L ), d4 = ( -2 + 6 * s ) / L;
+      const double s                                 = 0.5 * ( xi + 1 );
+      const double L                                 = length;
+      const auto [N, dNds]                           = lagrange( s );
+      const Eigen::Matrix< double, 1, nHermite > d2H = hermite( s, 2 );
 
-      BSized        B  = BSized::Zero();
-      constexpr int n2 = nDofPerNode;
-      B( 0, 0 )        = -1 / L;
-      B( 0, n2 )       = 1 / L;
-      if constexpr ( nDim == 2 ) {
-        B( 1, 1 ) = d1, B( 1, 2 ) = d2, B( 1, n2 + 1 ) = d3, B( 1, n2 + 2 ) = d4; // kappa = v''
-      }
-      else {
-        B( 1, 2 ) = -d1, B( 1, 4 ) = d2, B( 1, n2 + 2 ) = -d3, B( 1, n2 + 4 ) = d4; // kappa_y = -w''
-        B( 2, 1 ) = d1, B( 2, 5 ) = d2, B( 2, n2 + 1 ) = d3, B( 2, n2 + 5 ) = d4;   // kappa_z = v''
-        B( 3, 3 ) = -1 / L, B( 3, n2 + 3 ) = 1 / L;                                 // chi = phi'
+      BSized B = BSized::Zero();
+      for ( int a = 0; a < nNodes; a++ ) {
+        const int    i  = a * nDofPerNode;
+        const double dN = dNds( a ) / L;                                       // d/dx
+        const double dv = d2H( 2 * a ) / ( L * L ), dt = d2H( 2 * a + 1 ) / L; // d2/dx2 of the value and slope parts
+        B( 0, i ) = dN;
+        if constexpr ( nDim == 2 ) {
+          B( 1, i + 1 ) = dv, B( 1, i + 2 ) = dt; // kappa = v''
+        }
+        else {
+          B( 1, i + 2 ) = -dv, B( 1, i + 4 ) = dt; // kappa_y = -w''
+          B( 2, i + 1 ) = dv, B( 2, i + 5 ) = dt;  // kappa_z = v''
+          B( 3, i + 3 ) = dN;                      // chi = phi'
+        }
       }
       return B * T;
     }
@@ -422,14 +367,19 @@ namespace Marmot::Elements {
         throw std::invalid_argument( MakeString()
                                      << __PRETTY_FUNCTION__ << ": element " << elLabel << " has zero length" );
       const VectorDim e1 = axis / length;
+      if constexpr ( nNodes == 3 ) {
+        if ( ( coordinates.col( 2 ) - 0.5 * ( coordinates.col( 0 ) + coordinates.col( 1 ) ) ).norm() > 1e-6 * length )
+          throw std::invalid_argument( MakeString() << __PRETTY_FUNCTION__ << ": element " << elLabel
+                                                    << ": the mid node must lie at the middle of the beam" );
+      }
       if constexpr ( nDim == 2 ) {
         R.row( 0 ) = e1.transpose();
         R.row( 1 ) << -e1( 1 ), e1( 0 );
       }
       else {
-        const Eigen::Vector3d v  = elementProperties.template segment< 3 >( 4 );
+        const Eigen::Vector3d v  = elementProperties.template segment< 3 >( 0 );
         const Eigen::Vector3d vn = v - v.dot( e1 ) * e1;
-        if ( vn.norm() < 1e-8 * v.norm() || v.norm() == 0 )
+        if ( v.norm() == 0 || vn.norm() < 1e-8 * v.norm() )
           throw std::invalid_argument( MakeString() << __PRETTY_FUNCTION__ << ": element " << elLabel
                                                     << ": the orientation vector must not be parallel to the axis" );
         const Eigen::Vector3d e2 = vn.normalized();
@@ -447,19 +397,18 @@ namespace Marmot::Elements {
           T.template block< 3, 3 >( a * nDofPerNode + 3, a * nDofPerNode + 3 ) = R;
       }
 
-      makeFibers();
-
+      const double J = nDim == 3 ? elementProperties[3] : 0.0;
       for ( auto& qp : qps ) {
         qp.B  = strainOperator( qp.xi );
         qp.dV = 0.5 * length * qp.weight;
+        try {
+          qp.section.setFibers( elementProperties.data() + nHeader, nSectionPoints(), J );
+        }
+        catch ( const std::invalid_argument& e ) {
+          throw std::invalid_argument( MakeString() << "element " << elLabel << ": " << e.what() );
+        }
       }
-      if ( material )
-        material->setCharacteristicElementLength( length / static_cast< double >( qps.size() ) );
-    }
-
-    double* fiberState( const QuadraturePoint& qp, size_t f ) const
-    {
-      return qp.stateVars + nQpStateVarsOwn + f * nFiberStride();
+      createMaterials();
     }
 
     void setInitialConditions( StateTypes state, const double* ) override
@@ -467,104 +416,11 @@ namespace Marmot::Elements {
       switch ( state ) {
       case MarmotElement::MarmotMaterialInitialization: {
         for ( auto& qp : qps )
-          for ( size_t f = 0; f < fibers.size(); f++ ) {
-            double* fs = fiberState( qp, f );
-            std::fill( fs, fs + nFiberStateVars, 0.0 );
-            material->initializeYourself( fs + nFiberStateVars, nMaterialStateVars() );
-          }
+          qp.section.initializeStateVars( qp.stateVars + nQpStateVarsOwn );
         break;
       }
       default: throw std::invalid_argument( MakeString() << __PRETTY_FUNCTION__ << ": invalid initial condition" );
       }
-    }
-
-    /**
-     * The stress of a fiber for the strain increment [d eps11, d gamma12, d gamma13], with sigma22 = sigma33 = sigma23
-     * = 0 found by a Newton iteration on the free strains, and the condensed tangent.
-     *
-     * @param fs fiber state: [sigma11, sigma12, sigma13, energy density, dissipation density, material state]
-     */
-    void computeFiberStress( double* fs, Eigen::Matrix3d& C, const Eigen::Vector3d& dEps, double time, double dT ) const
-    {
-      using MHE                               = MarmotMaterialHypoElastic;
-      static constexpr std::array< int, 3 > p = { 0, 3, 4 }; // prescribed: eps11, gamma12, gamma13
-      static constexpr std::array< int, 3 > f = { 1, 2, 5 }; // free: sigma22 = sigma33 = sigma23 = 0
-
-      const int                   nMat = nMaterialStateVars();
-      double*                     sv   = fs + nFiberStateVars;
-      const std::vector< double > svOld( sv, sv + nMat );
-      Marmot::Vector6d            dE = Marmot::Vector6d::Zero();
-      Marmot::Matrix6d            C6;
-      MHE::state3D                state;
-      for ( int i = 0; i < 3; i++ )
-        dE( p[i] ) = dEps( i );
-
-      const double sigmaScale = std::max( 1.0, Eigen::Map< const Eigen::Vector3d >( fs ).cwiseAbs().maxCoeff() );
-      for ( int iteration = 0;; iteration++ ) {
-        std::copy( svOld.begin(), svOld.end(), sv );
-        state.stress.setZero();
-        for ( int i = 0; i < 3; i++ )
-          state.stress( p[i] ) = fs[i];
-        state.elasticEnergyDensity = fs[3];
-        state.dissipation          = fs[4];
-        state.stateVars            = sv;
-
-        C6.setZero();
-        material->computeStress( state, C6, dE, { time, dT } );
-
-        Eigen::Vector3d r, sP;
-        Eigen::Matrix3d Cff, Cfp, Cpf, Cpp;
-        for ( int i = 0; i < 3; i++ ) {
-          r( i )  = state.stress( f[i] );
-          sP( i ) = state.stress( p[i] );
-          for ( int j = 0; j < 3; j++ ) {
-            Cff( i, j ) = C6( f[i], f[j] );
-            Cfp( i, j ) = C6( f[i], p[j] );
-            Cpf( i, j ) = C6( p[i], f[j] );
-            Cpp( i, j ) = C6( p[i], p[j] );
-          }
-        }
-        const auto   CffLU    = Cff.fullPivLu();
-        const double residual = r.cwiseAbs().maxCoeff();
-        if ( residual <= 1e-12 * std::max( sigmaScale, sP.cwiseAbs().maxCoeff() ) ||
-             ( iteration > 7 && residual <= 1e-9 * std::max( sigmaScale, sP.cwiseAbs().maxCoeff() ) ) ) {
-          for ( int i = 0; i < 3; i++ )
-            fs[i] = sP( i );
-          fs[3] = state.elasticEnergyDensity;
-          fs[4] = state.dissipation;
-          C     = Cpp - Cpf * CffLU.solve( Cfp );
-          return;
-        }
-        if ( iteration >= 15 || !CffLU.isInvertible() ) {
-          MarmotJournal::warningToMSG( "BeamElement: fiber stress iteration requires cutback" );
-          throw Marmot::StressUpdateFailed( MakeString() << __PRETTY_FUNCTION__ << ": element " << elLabel
-                                                         << ": the fiber stress iteration did not converge" );
-        }
-        const Eigen::Vector3d ddE = CffLU.solve( r );
-        for ( int i = 0; i < 3; i++ )
-          dE( f[i] ) -= ddE( i );
-      }
-    }
-
-    /// Section forces and tangent for the increment of the generalized strains; updates the state of the point
-    void computeSection( QuadraturePoint& qp, VectorGen& s, MatrixGen& D, const VectorGen& dE, double time, double dT )
-    {
-      s.setZero();
-      D.setZero();
-      double energy = 0, dissipation = 0;
-      for ( size_t k = 0; k < fibers.size(); k++ ) {
-        const Fiber&    fiber = fibers[k];
-        double*         fs    = fiberState( qp, k );
-        Eigen::Matrix3d C;
-        computeFiberStress( fs, C, fiber.S * dE, time, dT );
-        const Eigen::Map< const Eigen::Vector3d > sigma( fs );
-        s += fiber.S.transpose() * sigma * fiber.area;
-        D += fiber.S.transpose() * C * fiber.S * fiber.area;
-        energy += fs[3] * fiber.area;
-        dissipation += fs[4] * fiber.area;
-      }
-      qp.stateVars[idxElasticEnergy] = energy * qp.dV;
-      qp.stateVars[idxDissipation]   = dissipation * qp.dV;
     }
 
     void computeKernels( const double* QTotal_, const double* dQ_, double* Pe_, double* Ke_, double time, double dT )
@@ -578,10 +434,13 @@ namespace Marmot::Elements {
       for ( auto& qp : qps ) {
         VectorGen s;
         MatrixGen D;
-        computeSection( qp, s, D, qp.B * dQ, time, dT );
+        double    energy, dissipation;
+        qp.section.computeSection( qp.stateVars + nQpStateVarsOwn, s, D, energy, dissipation, qp.B * dQ, time, dT );
 
         Eigen::Map< VectorGen >( qp.stateVars + idxSectionForces )  = s;
         Eigen::Map< VectorGen >( qp.stateVars + idxSectionStrains ) = qp.B * QTotal;
+        qp.stateVars[idxElasticEnergy]                              = energy * qp.dV;
+        qp.stateVars[idxDissipation]                                = dissipation * qp.dV;
 
         Pe += qp.B.transpose() * s * qp.dV;
         Ke += qp.B.transpose() * D * qp.B * qp.dV;
@@ -612,7 +471,7 @@ namespace Marmot::Elements {
     {
       Eigen::Map< RhsSized >        P( P_ );
       Eigen::Map< const VectorDim > b( load );
-      const VectorDim               q = R * b * sectionProperties()[0]; // local line load
+      const VectorDim               q = R * b * area(); // local line load
       for ( const auto& qp : qps )
         P += displacementInterpolation( qp.xi ).transpose() * q * qp.dV;
     }
@@ -639,16 +498,10 @@ namespace Marmot::Elements {
       // "fiber <k> <state>"
       if ( stateName.rfind( "fiber ", 0 ) == 0 ) {
         const size_t space = stateName.find( ' ', 6 );
-        if ( space != std::string::npos ) {
-          const size_t k = std::stoul( stateName.substr( 6, space - 6 ) );
-          if ( k >= fibers.size() )
-            throw std::invalid_argument( MakeString() << __PRETTY_FUNCTION__ << ": fiber " << k << " does not exist" );
-          double*           fs   = fiberState( qp, k );
-          const std::string name = stateName.substr( space + 1 );
-          if ( name == "stress" )
-            return { fs, 3 };
-          return material->getStateView( name, fs + nFiberStateVars );
-        }
+        if ( space != std::string::npos )
+          return qp.section.getFiberStateView( qp.stateVars + nQpStateVarsOwn,
+                                               std::stoul( stateName.substr( 6, space - 6 ) ),
+                                               stateName.substr( space + 1 ) );
       }
       throw std::invalid_argument( MakeString() << __PRETTY_FUNCTION__ << ": unknown state " << stateName );
     }
