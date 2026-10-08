@@ -62,9 +62,10 @@ namespace Marmot::Elements {
    * normal slip is the relative position of the bar partner w.r.t. the channel point, normal to the axis.
    *
    * Each channel point represents a tributary part of the channel (the Gauss-Lobatto weights tile the channel). Its
-   * bond is scaled by the fraction of the tributary part still covered by the bar, \f$f \in [0, 1]\f$, with the
-   * positions of the bar ends found from the slip of the point. As a bar end slides along the channel, the bond fades
-   * continuously; a channel point the bar has left completely (\f$f = 0\f$) has no bond and its history is frozen.
+   * bond is scaled by \f$f = 3 x^2 - 2 x^3\f$ of the fraction \f$x \in [0, 1]\f$ of the tributary part still covered
+   * by the bar, with the positions of the bar ends found from the slip of the point. As a bar end slides along the
+   * channel, the bond fades smoothly (\f$C^1\f$, a kink would make Newton's method cycle); a channel point the bar has
+   * left completely (\f$f = 0\f$) has no bond and its history is frozen.
    * Parts of the bar outside of all channels -- e.g., pulled out of the concrete -- are unbonded. The bonded length
    * therefore shrinks, exactly, and the free length grows as the bar is pulled out. For small slips (\f$f = 1\f$),
    * the element is identical to the small-slip EmbeddedBondElement.
@@ -521,10 +522,12 @@ namespace Marmot::Elements {
           coveredStart = std::max( coveredStart, cumulativeLengths_.front() + slip( 0 ) );
         if ( endIsBarEnd > 0.5 )
           coveredEnd = std::min( coveredEnd, cumulativeLengths_.back() + slip( 0 ) );
-        const double fraction = std::clamp( ( coveredEnd - coveredStart ) / ( qp.Sb - qp.Sa ), 0.0, 1.0 );
+        // C1 smooth fade: a kink in the bond force when a bar end leaves a tributary part makes Newton cycle
+        const double covered  = std::clamp( ( coveredEnd - coveredStart ) / ( qp.Sb - qp.Sa ), 0.0, 1.0 );
+        const double fraction = covered * covered * ( 3.0 - 2.0 * covered );
 
         sv.partner         = partner.element + 0.5 * ( partner.xi + 1 );
-        sv.coveredFraction = fraction;
+        sv.coveredFraction = covered;
         if ( fraction <= 0.0 ) {
           // the bar has left the channel point: no bond, the history is kept
           sv.active        = 0.0;

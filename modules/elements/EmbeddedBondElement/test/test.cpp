@@ -256,8 +256,8 @@ void testLargeSlipPullOutLosesBond()
   const auto [P, K] = large.kernels( U, Eigen::VectorXd::Zero( large.nDof ), true );
 
   // Lobatto points at x = 0.5, 2.0, 3.5 with tributary parts [0, 0.5], [0.5, 2.5], [2.5, 3] of the channel; the bar
-  // start slid to 1.0: covered fractions 0, 0.75, 1 -> bonded length 2.0 with the slip 1.0
-  const double expected = 100. * 1.0 * 2.0;
+  // start slid to 1.0: covered fractions 0, 0.75, 1, smoothed by 3x^2 - 2x^3 to 0, 0.84375, 1
+  const double expected = 100. * 1.0 * ( 2.0 * 0.84375 + 0.5 * 1.0 );
   throwExceptionOnFailure( checkIfEqual( P( 16 ) + P( 18 ), expected, 1e-9 ),
                            MakeString() << "bar force " << P( 16 ) + P( 18 ) << " != " << expected );
   throwExceptionOnFailure( checkIfEqual( *large.element->getStateView( "active", 0 ).stateLocation, 0.0, 0.0 ) &&
