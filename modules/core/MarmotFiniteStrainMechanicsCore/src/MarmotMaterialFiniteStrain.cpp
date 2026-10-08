@@ -1,4 +1,5 @@
 #include "Marmot/MarmotMaterialFiniteStrain.h"
+#include "Marmot/MarmotExceptions.h"
 #include "Marmot/MarmotJournal.h"
 #include "Marmot/MarmotTypedefs.h"
 
@@ -72,6 +73,70 @@ void MarmotMaterialFiniteStrain::computePlaneStress( ConstitutiveResponse< 2 >& 
                                                      const TimeIncrement&       timeIncrement ) const
 {
   throw std::invalid_argument( MakeString() << __PRETTY_FUNCTION__ << "Not yet implemented." );
+}
+
+void MarmotMaterialFiniteStrain::computeUniaxialStress( ConstitutiveResponse< 3 >& response,
+                                                        double&                    dTau11_dF11,
+                                                        Deformation< 3 >&          deformation,
+                                                        const TimeIncrement&       timeIncrement ) const
+{
+  using namespace Marmot;
+
+  constexpr int    maxIterations = 25;
+  constexpr double tolerance     = 1e-12; // on the Newton correction of the lateral stretches, i.e., a strain
+
+  Eigen::Map< Eigen::VectorXd > stateVars( response.stateVars, stateLayout.totalSize() );
+  const Eigen::VectorXd         stateVarsOld = stateVars;
+  const auto                    responseOld  = response;
+
+  AlgorithmicModuli< 3 > tangents;
+  Eigen::Matrix2d        dTauLateral_dFLateral;
+
+  for ( int iteration = 0;; iteration++ ) {
+
+    // every evaluation starts from the beginning of the increment, a path dependent material must not see the
+    // trial states of this iteration
+    stateVars = stateVarsOld;
+    response  = responseOld;
+
+    computeStress( response, tangents, deformation, timeIncrement );
+
+    const auto& C = tangents.dTau_dF;
+    dTauLateral_dFLateral << C( 1, 1, 1, 1 ), C( 1, 1, 2, 2 ), C( 2, 2, 1, 1 ), C( 2, 2, 2, 2 );
+
+    const Eigen::Vector2d residual( response.tau( 1, 1 ), response.tau( 2, 2 ) );
+
+    const auto            solver     = dTauLateral_dFLateral.fullPivLu();
+    const Eigen::Vector2d correction = -solver.solve( residual );
+
+    if ( !solver.isInvertible() || !correction.allFinite() )
+      throw StressUpdateFailed( MakeString() << __PRETTY_FUNCTION__
+                                             << ": singular lateral tangent in the uniaxial stress iteration" );
+
+    if ( correction.norm() <= tolerance )
+      break;
+
+    if ( iteration >= maxIterations ) {
+      MarmotJournal::warningToMSG( "UniaxialStress (finite strain) requires cutback" );
+      throw StressUpdateFailed( MakeString() << __PRETTY_FUNCTION__ << ": uniaxial stress iteration did not converge" );
+    }
+
+    // a lateral stretch must stay positive: damp the correction if it would invert the lateral fibers
+    double damping = 1.0;
+    while ( deformation.F( 1, 1 ) + damping * correction( 0 ) <= 0.0 ||
+            deformation.F( 2, 2 ) + damping * correction( 1 ) <= 0.0 )
+      damping *= 0.5;
+
+    deformation.F( 1, 1 ) += damping * correction( 0 );
+    deformation.F( 2, 2 ) += damping * correction( 1 );
+  }
+
+  // condensation of the lateral stretches: dTau11/dF11 under tau22 = tau33 = 0
+  const auto&           C = tangents.dTau_dF;
+  const Eigen::Vector2d dTau11_dFLateral( C( 0, 0, 1, 1 ), C( 0, 0, 2, 2 ) );
+  const Eigen::Vector2d dTauLateral_dF11( C( 1, 1, 0, 0 ), C( 2, 2, 0, 0 ) );
+
+  dTau11_dF11 = C( 0, 0, 0, 0 ) - dTau11_dFLateral.dot( dTauLateral_dFLateral.fullPivLu().solve( dTauLateral_dF11 ) );
 }
 
 /** The basic implementation here assumes non-chirial, isotropic elastic behavior.

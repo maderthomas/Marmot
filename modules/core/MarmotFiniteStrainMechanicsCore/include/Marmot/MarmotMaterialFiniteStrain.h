@@ -279,6 +279,29 @@ public:
   }
 
   /**
+   * @brief Compute stress under uniaxial stress conditions.
+   * @param[inout] response ConstitutiveResponse instance; holds the values at the beginning of the increment on entry
+   * and the updated ones on exit
+   * @param[out] dTau11_dF11 condensed algorithmic tangent \f$\frac{\mathrm{d}\tau_{11}}{\mathrm{d}F_{11}}\f$ under the
+   * constraint \f$\tau_{22} = \tau_{33} = 0\f$
+   * @param[inout] deformation Deformation instance; \f$F_{11}\f$ is the prescribed axial stretch, \f$F_{22}\f$ and
+   * \f$F_{33}\f$ are the initial guess of the lateral stretches on entry and the converged ones on exit. All
+   * off-diagonal components must be zero.
+   * @param[in] timeIncrement TimeIncrement instance
+   *
+   * The general 3D computeStress function is called repeatedly, and the lateral stretches are found by a Newton
+   * iteration on \f$\tau_{22} = \tau_{33} = 0\f$. The state variables and the response are reset to their values at
+   * the beginning of the increment before every evaluation, so path dependent materials see one single update. The
+   * axis \f$1\f$ is the axis of the uniaxial stress state, e.g., the axis of a truss.
+   *
+   * @throws Marmot::StressUpdateFailed if the iteration does not converge, which should trigger a cutback
+   */
+  virtual void computeUniaxialStress( ConstitutiveResponse< 3 >& response,
+                                      double&                    dTau11_dF11,
+                                      Deformation< 3 >&          deformation,
+                                      const TimeIncrement&       timeIncrement ) const;
+
+  /**
    * @brief Find the eigen deformation that corresponds to a given eigen stress.
    * @param initialGuess Initial guess for the eigen deformation.
    * @param eigenStress Target eigen stress.
