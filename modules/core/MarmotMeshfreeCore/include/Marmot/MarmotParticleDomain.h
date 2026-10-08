@@ -144,6 +144,16 @@ namespace Marmot::Meshfree {
     }
 
     /**
+     * @brief Gets the coordinates of a specific face's center in the UNDEFORMED configuration.
+     * @param faceID The ID of the face (1-based index).
+     * @return An Eigen vector representing the undeformed face center coordinates.
+     */
+    CoordinatesSized getFaceCenterCoordinatesUndeformed( int faceID ) const
+    {
+      return _cellForGeometryUndeformed.getFaceCenterCoordinates( faceID );
+    }
+
+    /**
      * @brief Gets the coordinates of a specific evaluation point (face center of the smoothing domain).
      * @param[in] faceID The ID of the face (1-based index).
      * @return An Eigen vector representing the evaluation point coordinate.
