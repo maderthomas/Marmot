@@ -127,6 +127,20 @@ namespace Marmot::Meshfree {
       const std::vector< const MarmotMeshfreeKernelFunction* >& kernelFunctions ) = 0;
 
     /**
+     * @brief Assign separate kernel functions to the displacement and to the further fields (e.g. pressure and
+     *        Jacobian of a mixed u-p-J particle), for particles with a lower order approximation of the latter.
+     * @details The default ignores @p kernelFunctionsPJ and assigns @p kernelFunctionsU.
+     * @param[in] kernelFunctionsU  Kernel functions of the displacement field.
+     * @param[in] kernelFunctionsPJ Kernel functions of the further fields.
+     */
+    virtual void assignMeshfreeKernelFunctions(
+      const std::vector< const MarmotMeshfreeKernelFunction* >& kernelFunctionsU,
+      const std::vector< const MarmotMeshfreeKernelFunction* >& kernelFunctionsPJ )
+    {
+      this->assignMeshfreeKernelFunctions( kernelFunctionsU );
+    }
+
+    /**
      * @brief Assign the memory block that holds the state variables of the particle.
      * @param[in] stateVars Pointer to a block of (at least) getNumberOfRequiredStateVars() doubles, owned by the
      * host framework.

@@ -63,6 +63,21 @@ namespace MarmotLibrary {
                                              int                nMaterialProperties,
 
                                              const Marmot::Meshfree::MarmotMeshfreeApproximation& approximation );
+    /**
+     * @brief Signature of the factory function of a mixed particle type with two approximations, one for the
+     * displacement and one (e.g. of lower order) for the further fields; arguments as for particleFactoryFunction.
+     */
+    using mixedParticleFactoryFunction =
+      Marmot::Meshfree::MarmotParticle* (*)( int                                                  particleNumber,
+                                             const double*                                        vertexCoordinates,
+                                             int                                                  sizeVertexCoordinates,
+                                             double                                               volume,
+                                             const std::string&                                   materialName,
+                                             const double*                                        materialProperties,
+                                             int                                                  nMaterialProperties,
+                                             const Marmot::Meshfree::MarmotMeshfreeApproximation& approximationU,
+                                             const Marmot::Meshfree::MarmotMeshfreeApproximation& approximationPJ );
+
     /// @brief The factory is a static class and cannot be instantiated.
     MarmotParticleFactory() = delete;
 
@@ -104,6 +119,29 @@ namespace MarmotLibrary {
      */
     static bool registerParticle( const std::string& particleName, particleFactoryFunction factoryFunction );
 
+    /**
+     * @brief Create a mixed particle with separate approximations for the displacement and the further fields.
+     * @details Arguments as for the other createParticle(); both approximations must outlive the particle.
+     * @throws std::invalid_argument if no mixed particle is registered under @p particleName.
+     */
+    static Marmot::Meshfree::MarmotParticle* createParticle(
+      const std::string&                                   particleName,
+      int                                                  materialNumber,
+      const double*                                        vertexCoordinates,
+      int                                                  sizeVertexCoordinates,
+      double                                               volume,
+      const std::string&                                   materialName,
+      const double*                                        materialProperties,
+      int                                                  nMaterialProperties,
+      const Marmot::Meshfree::MarmotMeshfreeApproximation& approximationU,
+      const Marmot::Meshfree::MarmotMeshfreeApproximation& approximationPJ );
+
+    /**
+     * @brief Register a mixed particle type under a name (see the other registerParticle()).
+     * @return true, to allow the registration in the initializer of a static variable.
+     */
+    static bool registerParticle( const std::string& particleName, mixedParticleFactoryFunction factoryFunction );
+
   private:
     /**
      * @brief Check whether a particle name is registered (declared only, not defined).
@@ -116,6 +154,9 @@ namespace MarmotLibrary {
     /// during static initialization, possibly before a static data member of this translation unit would be
     /// constructed).
     static std::unordered_map< std::string, particleFactoryFunction >& particleFactoryFunctionByName();
+
+    /// @brief Registered factory functions of the mixed particles, by upper-case name (function-local static).
+    static std::unordered_map< std::string, mixedParticleFactoryFunction >& mixedParticleFactoryFunctionByName();
   };
 
 } // namespace MarmotLibrary

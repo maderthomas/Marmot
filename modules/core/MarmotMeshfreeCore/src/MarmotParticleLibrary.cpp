@@ -48,6 +48,52 @@ namespace MarmotLibrary {
     return map;
   }
 
+  std::unordered_map< std::string, MarmotParticleFactory::mixedParticleFactoryFunction >& MarmotParticleFactory::
+    mixedParticleFactoryFunctionByName()
+  {
+    static std::unordered_map< std::string, mixedParticleFactoryFunction > map;
+    return map;
+  }
+
+  bool MarmotParticleFactory::registerParticle( const std::string&           particleName,
+                                                mixedParticleFactoryFunction factoryFunction )
+  {
+    const auto particleNameUpperCase = makeStringUpperCase_( particleName );
+    assert( mixedParticleFactoryFunctionByName().find( particleNameUpperCase ) ==
+            mixedParticleFactoryFunctionByName().end() );
+    mixedParticleFactoryFunctionByName()[particleNameUpperCase] = factoryFunction;
+    return true;
+  }
+
+  Marmot::Meshfree::MarmotParticle* MarmotParticleFactory::createParticle(
+    const std::string&                                   particleName,
+    int                                                  particleNumber,
+    const double*                                        vertexCoordinates,
+    int                                                  sizeVertexCoordinates,
+    double                                               volume,
+    const std::string&                                   materialName,
+    const double*                                        materialProperties,
+    int                                                  sizeMaterialProperties,
+    const Marmot::Meshfree::MarmotMeshfreeApproximation& approximationU,
+    const Marmot::Meshfree::MarmotMeshfreeApproximation& approximationPJ )
+  {
+    const auto particleNameUpperCase = makeStringUpperCase_( particleName );
+    try {
+      return mixedParticleFactoryFunctionByName().at( particleNameUpperCase )( particleNumber,
+                                                                               vertexCoordinates,
+                                                                               sizeVertexCoordinates,
+                                                                               volume,
+                                                                               materialName,
+                                                                               materialProperties,
+                                                                               sizeMaterialProperties,
+                                                                               approximationU,
+                                                                               approximationPJ );
+    }
+    catch ( const std::out_of_range& e ) {
+      throw std::invalid_argument( MakeString() << "Invalid mixed particle " << particleName << " requested!" );
+    }
+  }
+
   bool MarmotParticleFactory::registerParticle( const std::string&      particleName,
                                                 particleFactoryFunction factoryFunction )
   {
