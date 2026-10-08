@@ -450,8 +450,10 @@ namespace Marmot::Elements {
         qp.c     = cStart + 0.5 * ( cEnd - cStart ) * ( rule[q].first + 1 );
         qp.Sa    = SStart + ( SEnd - SStart ) * cumulativeWeight / 2.0;
         cumulativeWeight += rule[q].second;
-        qp.Sb           = SStart + ( SEnd - SStart ) * cumulativeWeight / 2.0;
-        const int    k  = std::clamp( static_cast< int >( std::floor( qp.c ) ), 0, nBarElements - 1 );
+        qp.Sb = SStart + ( SEnd - SStart ) * cumulativeWeight / 2.0;
+        // the channel lies in one bar element; taken from its midpoint, since a point at the end of the channel (an
+        // integer c) would otherwise be attributed to the neighboring bar element, with its (possibly different) length
+        const int    k = std::clamp( static_cast< int >( std::floor( 0.5 * ( cStart + cEnd ) ) ), 0, nBarElements - 1 );
         const double xi = 2.0 * ( qp.c - k ) - 1.0;
 
         const auto      Xe = barElementCoordinates( chainCoordinates, k );

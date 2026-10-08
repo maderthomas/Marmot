@@ -320,6 +320,22 @@ void testLargeSlipTangent3D()
                            "large-slip tangent does not match an independent numerical one" );
 }
 
+/// bar elements of different lengths: a channel point at the end of the channel (Gauss-Lobatto) belongs to its own
+/// bar element, not to the (longer) next one; pushing the bar back by d gives Kt d p L of the channel exactly
+void testLargeSlipUnequalBarElements()
+{
+  // chain of 2 bar elements: 0.5 -> 1.5 (length 1, the channel) -> 3.5 (length 2)
+  const std::vector< double > chain = { 0.5, 1.5, 1.5, 1.5, 3.5, 1.5 };
+  Bond large( "EBLS2D2Q8W2", concat( quad8, chain ), { 1.0, 0.0, 1.0, 1.0, 1.0 }, "LINEARELASTICBONDSLIP", linearBond );
+  Eigen::VectorXd U = Eigen::VectorXd::Zero( large.nDof );
+  const double    d = 1e-3;
+  U( 16 ) = U( 18 ) = U( 20 ) = -d; // pushed back: no part of the channel is left by the bar
+  const auto [P, K]           = large.kernels( U, Eigen::VectorXd::Zero( large.nDof ), false );
+  const double barForce       = P( 16 ) + P( 18 ) + P( 20 );
+  throwExceptionOnFailure( checkIfEqual( barForce, -100. * d * 1.0 * 1.0, 1e-12 ),
+                           MakeString() << "bar force " << barForce << " != Kt d p L = " << -100. * d );
+}
+
 void testFactoryNames()
 {
   for ( const auto& name : { "EB2D2Q4",
@@ -355,6 +371,7 @@ int main()
     testLargeSlipPullOutLosesBond,
     testLargeSlipWindowExceededThrows,
     testLargeSlipTangent3D,
+    testLargeSlipUnequalBarElements,
   } );
   return 0;
 }
