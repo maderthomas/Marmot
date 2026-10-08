@@ -143,6 +143,9 @@ namespace Marmot::Meshfree {
     /// Central deformation gradient increment @f$ \Delta\boldsymbol{F}_c @f$ with respect to the last accepted
     /// state (mapped state variables).
     Eigen::Map< JacobianSized > _centralDeformationGradientDelta;
+    /// Center displacement increment of the current step, re-evaluated in every iteration and added to
+    /// #_centerDisplacement only in acceptStateAndPosition(), so that it does not accumulate over the iterations.
+    CoordinatesSized _centerDisplacementDelta;
 
     KernelFunctionVector _assignedKernelFunctions; ///< Pointers to the kernel functions assigned to this particle.
 
@@ -272,6 +275,7 @@ namespace Marmot::Meshfree {
     void initializeYourself() override
     {
       _centerDisplacement.setZero();
+      _centerDisplacementDelta.setZero();
       _centralDeformationGradient.setIdentity();
       _centralDeformationGradientDelta.setIdentity();
 
@@ -322,6 +326,9 @@ namespace Marmot::Meshfree {
     {
       _centralDeformationGradient = _centralDeformationGradientDelta * _centralDeformationGradient;
       _centralDeformationGradientDelta.setIdentity();
+
+      _centerDisplacement += _centerDisplacementDelta;
+      _centerDisplacementDelta.setZero();
 
       _particleDomainMain.acceptStateAndPosition( _centralDeformationGradient, _centerDisplacement );
       for ( auto& sd : _subDomains )
@@ -431,14 +438,13 @@ namespace Marmot::Meshfree {
 
     /**
      * @brief Computes the physics kernels (internal forces and their derivatives) for the particle.
-     * @details Updates the center kinematics from the main domain (the center displacement is incremented by
-     *          @f$ \sum_B N_B \Delta\boldsymbol{q}_B @f$ and @f$ \Delta\boldsymbol{F}_c @f$ is set, see the class
-     *          documentation), then calls computePhysicsKernelsOnSubdomains(). As for all Marmot entities, the
-     *          state variables are updated in place, and the host restores them to the last accepted state before
-     *          each evaluation (EdelweissMeshfree does so in every computePhysicsKernels call): the center
-     *          displacement thus stays the total one, which acceptStateAndPosition() applies to the undeformed
-     *          domain.
-     * @param[in] dQ Incremental nodal displacements (the first nDim dofs of each node are used).
+     * @details Updates the center kinematics from the main domain (the center displacement increment
+     *          @f$ \sum_B N_B \Delta\boldsymbol{q}_B @f$ and @f$ \Delta\boldsymbol{F}_c @f$ are set, see the class
+     *          documentation), then calls computePhysicsKernelsOnSubdomains(). Both are assigned, not accumulated,
+     *          since @p dQ is the increment since the last accepted state in every iteration; they are applied to the
+     *          accepted state in acceptStateAndPosition().
+     * @param[in] dQ Incremental nodal dofs; the first nDim dofs of each node block of getNBaseDof() dofs are the
+     *               displacements (mixed formulations carry further dofs per node).
      * @param[in,out] fInt Internal force vector.
      * @param[in,out] dFInt_ddQ Stiffness matrix (derivative of internal forces with respect to incremental
      * displacements).
@@ -726,9 +732,10 @@ namespace Marmot::Meshfree {
       _nVCIConstraints( 0 ), // Initialized here, then set by setVCIOrder
       _meshfreeApproximation( approximation ),
       _particleDomainMain( vertexCoordinates, nVertexCoordinates, smoothingVolumeUpdateType ),
-      _centerDisplacement( nullptr ),             // Initialized to nullptr, will be re-mapped
-      _centralDeformationGradient( nullptr ),     // Initialized to nullptr, will be re-mapped
-      _centralDeformationGradientDelta( nullptr ) // Initialized to nullptr, will be re-mapped
+      _centerDisplacement( nullptr ),              // Initialized to nullptr, will be re-mapped
+      _centralDeformationGradient( nullptr ),      // Initialized to nullptr, will be re-mapped
+      _centralDeformationGradientDelta( nullptr ), // Initialized to nullptr, will be re-mapped
+      _centerDisplacementDelta( CoordinatesSized::Zero() )
   {
     _subDomains = _particleDomainMain.uniformSubdivided();
     _subDomainShapeFunctions.reserve( _subDomains.size() ); // Pre-allocate memory
@@ -963,7 +970,10 @@ namespace Marmot::Meshfree {
   {
     using namespace Fastor;
     using namespace Marmot::FastorIndices;
-    constexpr int nodeBlockSize = nDim;
+    // the displacement dofs are the first nDim entries of each node block; mixed
+    // formulations (e.g. u-p-J) carry additional dofs per node, so the stride must
+    // come from the concrete particle, not from nDim
+    const int nodeBlockSize = this->getNBaseDof();
     // update central deformation and displacement.
     TensorD  _du_center( 0.0 );
     TensorDD _dx_dY_center;
@@ -991,10 +1001,11 @@ namespace Marmot::Meshfree {
       _du_center += du;
     }
 
-    // the state is restored to the accepted one before every call (see the state contract of MarmotParticle), so
-    // this adds the increment of the step to the accepted center displacement once per iteration, not cumulatively
     Eigen::Map< CoordinatesSized > du_center_eigen( _du_center.data() ); // Use alias
-    _centerDisplacement += du_center_eigen;
+    // dQ is the FULL increment each Newton iteration, so the center displacement of the
+    // increment must be assigned (like _centralDeformationGradientDelta), not accumulated;
+    // it is folded into _centerDisplacement once, in acceptStateAndPosition().
+    _centerDisplacementDelta = du_center_eigen;
 
     Eigen::Map< Eigen::Matrix< double, nDim, nDim, Eigen::RowMajor > > dx_dY_map(
       _dx_dY_center.data() ); // Use RowMajor for Fastor compatibility
