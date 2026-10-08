@@ -19,6 +19,11 @@ All notable changes to Marmot are documented in this file. The format follows
 - `CWFCORRECTION`: `load[0]` selects the corrected traction components as a bit mask (1 = x, 2 = y, 4 = z;
   0 or no load = all), for faces where only the normal displacement is prescribed.
 - Tests for all registered meshfree particles, cells and material points, and for the meshfree core.
+- Embedded reinforcement: `elements/TrussElement` (`TR2D2`, `TR2D3`, `TR3D2`, `TR3D3` small strain; `TR*FS` finite
+  strain, co-rotated), `elements/EmbeddedBondElement` (`EB<nDim>D<nBarNodes><host>`, bond-slip of a bar in a host
+  element), the pluggable `MarmotBondSlipLaw` interface with its `MarmotBondSlipLawFactory`, and the bond-slip laws
+  `materials/LinearElasticBondSlip` and `materials/ModelCode2010BondSlip`.
+- `MarmotMaterialFiniteStrain::computeUniaxialStress`: uniaxial stress reduction of finite strain materials.
 
 ### Changed
 - **Breaking:** a rank-deficient moment matrix of the reproducing kernel approximations now throws
