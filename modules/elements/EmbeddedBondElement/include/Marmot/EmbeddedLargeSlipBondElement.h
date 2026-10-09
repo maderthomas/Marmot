@@ -287,11 +287,17 @@ namespace Marmot::Elements {
       const bool tet = hostGeometry.shape == FiniteElement::ElementShapes::Tetra4 ||
                        hostGeometry.shape == FiniteElement::ElementShapes::Tetra10;
       VectorDim xi = tet ? VectorDim::Constant( 0.25 ) : VectorDim::Zero();
+      // relative coordinates + relative criterion, see EmbeddedBondElement::findHostParentCoordinates
+      const auto shift     = hostGeometry.coordinates.template head< nDim >().eval();
+      auto       coordsRel = hostGeometry.coordinates.eval();
+      for ( int n = 0; n < coordsRel.size() / nDim; n++ )
+        coordsRel.template segment< nDim >( n * nDim ) -= shift;
+      const VectorDim XRel = X - shift;
       for ( int iteration = 0;; iteration++ ) {
-        const VectorDim residual = hostGeometry.NB( hostGeometry.N( xi ) ) * hostGeometry.coordinates - X;
+        const VectorDim residual = hostGeometry.NB( hostGeometry.N( xi ) ) * coordsRel - XRel;
         const VectorDim dXi      = -hostGeometry.Jacobian( hostGeometry.dNdXi( xi ) ).inverse() * residual;
         xi += dXi;
-        if ( dXi.norm() < 1e-13 )
+        if ( dXi.norm() < 1e-11 )
           break;
         if ( iteration > 50 )
           throw std::invalid_argument( MakeString() << "EmbeddedLargeSlipBondElement " << elLabel

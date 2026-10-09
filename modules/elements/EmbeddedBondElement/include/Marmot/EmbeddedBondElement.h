@@ -233,12 +233,20 @@ namespace Marmot::Elements {
            hostGeometry.shape == FiniteElement::ElementShapes::Tetra10 )
         xi.setConstant( 0.25 );
 
+      // Newton in coordinates relative to the first host node: with absolute coordinates the residual carries
+      // the round-off of |X| (e.g. ~5e-13 for |X| ~ 4.5e3 mm), which an absolute |dXi| < 1e-13 cannot beat
+      // -> spurious "did not converge" for models far from the origin. Relative criterion: |dXi| < 1e-11.
+      const auto      shift    = hostGeometry.coordinates.template head< nDim >().eval();
+      auto            coordsRel = hostGeometry.coordinates.eval();
+      for ( int n = 0; n < coordsRel.size() / nDim; n++ )
+        coordsRel.template segment< nDim >( n * nDim ) -= shift;
+      const VectorDim XRel = X - shift;
       for ( int iteration = 0;; iteration++ ) {
-        const VectorDim residual = hostGeometry.NB( hostGeometry.N( xi ) ) * hostGeometry.coordinates - X;
+        const VectorDim residual = hostGeometry.NB( hostGeometry.N( xi ) ) * coordsRel - XRel;
         const MatrixDim J        = hostGeometry.Jacobian( hostGeometry.dNdXi( xi ) );
         const VectorDim dXi      = -J.inverse() * residual;
         xi += dXi;
-        if ( dXi.norm() < 1e-13 )
+        if ( dXi.norm() < 1e-11 )
           break;
         if ( iteration > 50 )
           throw std::invalid_argument( MakeString() << "EmbeddedBondElement " << elLabel
