@@ -23,6 +23,7 @@
  * ---------------------------------------------------------------------
  */
 #include "Marmot/BeamElement.h"
+#include "Marmot/CorotationalBeamElement.h"
 #include "Marmot/MarmotElementFactory.h"
 
 namespace Marmot::Elements::Registration {
@@ -42,5 +43,11 @@ namespace Marmot::Elements::Registration {
   const static bool BE2D3_isRegistered = registerBeam< 2, 3 >( "BE2D3" );
   const static bool BE3D2_isRegistered = registerBeam< 3, 2 >( "BE3D2" );
   const static bool BE3D3_isRegistered = registerBeam< 3, 3 >( "BE3D3" );
+
+  // co-rotational (finite rotation) Euler-Bernoulli beam, 2D, 2 nodes
+  const static bool
+    BE2D2CR_isRegistered = MarmotElementFactory::registerElement( "BE2D2CR", []( int elementID ) -> MarmotElement* {
+      return new CorotationalBeamElement2D( elementID );
+    } );
 
 } // namespace Marmot::Elements::Registration

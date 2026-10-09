@@ -27,6 +27,8 @@ All notable changes to Marmot are documented in this file. The format follows
 - `elements/BeamElement`: Euler-Bernoulli beams `BE2D2`, `BE2D3`, `BE3D2`, `BE3D3` (2 or 3 nodes, geometrically
   linear), node fields displacement and rotation, sections given as integration points (any shape) with one
   material instance per point (any hypoelastic material); for embedded beams in EdelweissFE.
+- `BE2D2CR`: co-rotational (finite rotation, Crisfield) 2D variant of `BE2D2` with the same properties and fiber
+  section; consistent material + geometric tangent; arbitrary rigid rotations (several turns), small local strains.
 - `MarmotMaterialHypoElastic::computeBeamStress`: beam stress reduction (sigma22 = sigma33 = sigma23 = 0; axial and
   transverse shear strains prescribed), appended at the end of the class (no shift of the existing virtual table).
 

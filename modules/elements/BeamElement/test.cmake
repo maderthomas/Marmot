@@ -3,3 +3,6 @@ SET(CURR_TEST_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/test")
 
 # Tests for the BeamElement
 add_marmot_test("TestBeamElement" "${CURR_TEST_SOURCE_DIR}/test.cpp" REQUIRES LinearElastic VonMises)
+
+# Tests for the co-rotational beam BE2D2CR
+add_marmot_test("TestCorotationalBeamElement" "${CURR_TEST_SOURCE_DIR}/testCorotational.cpp" REQUIRES LinearElastic VonMises)
