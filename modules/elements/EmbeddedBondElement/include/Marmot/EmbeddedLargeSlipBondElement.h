@@ -80,7 +80,9 @@ namespace Marmot::Elements {
    * thrown.
    *
    * The geometry of the channel and of the frame is the reference one; the tangent is computed by central
-   * differences of the internal forces.
+   * differences of the internal forces, perturbing only the host dofs and the nodes of the partner elements and their
+   * neighbors (all other columns are zero). The partner search walks along the chain from the previous partner instead
+   * of scanning the whole window; both together make the element cost independent of the window size.
    *
    * Material: a bond-slip law registered in the MarmotBondSlipLawFactory.
    */
@@ -163,6 +165,11 @@ namespace Marmot::Elements {
     };
 
     std::vector< QuadraturePoint > qps;
+
+    /// testing only: search the partner among all bar elements of the window (instead of walking from the previous)
+    bool exhaustiveSearch = false;
+    /// testing only: perturb all dofs for the tangent (instead of the host and the partner element neighborhoods)
+    bool fullTangent = false;
 
   private:
     double*               stateVars_  = nullptr;
@@ -316,41 +323,85 @@ namespace Marmot::Elements {
       bool   afterEnd    = false; ///< the projection lies behind the last chain node
     };
 
-    Partner findPartner( const Eigen::MatrixXd& x, const VectorDim& point ) const
+    /// closest point projection of a point onto bar element k of the current chain x (unclamped parameter)
+    double projectOnBarElement( const Eigen::MatrixXd& x, int k, const VectorDim& point ) const
     {
-      Partner best;
-      double  bestDistance = std::numeric_limits< double >::infinity();
-      double  xiFirst = 0, xiLast = 0;
-      for ( int k = 0; k < nBarElements; k++ ) {
-        const auto xe = barElementCoordinates( x, k );
-        double     xi = 0.0;
-        for ( int it = 0; it < 30; it++ ) {
-          const VectorDim d   = xe * barN( xi ).transpose() - point;
-          const VectorDim dx  = xe * barDNdXi( xi ).transpose();
-          VectorDim       ddx = VectorDim::Zero();
-          if constexpr ( nBarNodes == 3 )
-            ddx = xe * Eigen::Vector3d( 1., 1., -2. );
-          const double f   = d.dot( dx );
-          const double df  = dx.dot( dx ) + d.dot( ddx );
-          const double dxi = -f / df;
-          xi += dxi;
-          if ( std::abs( dxi ) < 1e-14 )
+      const auto xe = barElementCoordinates( x, k );
+      double     xi = 0.0;
+      for ( int it = 0; it < 30; it++ ) {
+        const VectorDim d   = xe * barN( xi ).transpose() - point;
+        const VectorDim dx  = xe * barDNdXi( xi ).transpose();
+        VectorDim       ddx = VectorDim::Zero();
+        if constexpr ( nBarNodes == 3 )
+          ddx = xe * Eigen::Vector3d( 1., 1., -2. );
+        const double f   = d.dot( dx );
+        const double df  = dx.dot( dx ) + d.dot( ddx );
+        const double dxi = -f / df;
+        xi += dxi;
+        if ( std::abs( dxi ) < 1e-14 )
+          break;
+      }
+      return xi;
+    }
+
+    /// distance of the point to bar element k, at the clamped parameter; a tiny penalty for a clamped projection
+    double clampedDistance( const Eigen::MatrixXd& x, int k, double xi, const VectorDim& point ) const
+    {
+      const double    xiClamped = std::clamp( xi, -1.0, 1.0 );
+      const VectorDim d         = barElementCoordinates( x, k ) * barN( xiClamped ).transpose() - point;
+      return d.norm() + ( std::abs( xi - xiClamped ) > 1e-12 ? 1e-12 : 0.0 );
+    }
+
+    /**
+     * @brief The partner of a point on the current bar axis: the closest point among all bar elements of the window.
+     *
+     * The search walks along the chain from the bar element of the previous partner (the slip of one increment is
+     * small compared with the window) to the element whose projection lies inside it, and then compares it with its
+     * two neighbors (the partner may lie at a kink of the chain). For a straight or convexly curved chain this is the
+     * global closest point; it is checked against the exhaustive search over the window in the tests.
+     * A negative start element searches exhaustively.
+     */
+    Partner findPartner( const Eigen::MatrixXd& x, const VectorDim& point, int kStart = -1 ) const
+    {
+      std::vector< double > xis( nBarElements, std::numeric_limits< double >::quiet_NaN() );
+      auto                  xiOf = [&]( int k ) {
+        if ( std::isnan( xis[k] ) )
+          xis[k] = projectOnBarElement( x, k, point );
+        return xis[k];
+      };
+
+      int kFirst = 0, kLast = nBarElements - 1;
+      if ( kStart >= 0 ) {
+        int k = std::clamp( kStart, 0, nBarElements - 1 ), lastMove = 0;
+        for ( int step = 0; step < nBarElements; step++ ) {
+          const double xi = xiOf( k );
+          if ( xi < -1.0 && k > 0 && lastMove != 1 ) {
+            k--;
+            lastMove = -1;
+          }
+          else if ( xi > 1.0 && k < nBarElements - 1 && lastMove != -1 ) {
+            k++;
+            lastMove = 1;
+          }
+          else
             break;
         }
-        if ( k == 0 )
-          xiFirst = xi;
-        if ( k == nBarElements - 1 )
-          xiLast = xi;
-        const double    xiClamped = std::clamp( xi, -1.0, 1.0 );
-        const VectorDim d         = xe * barN( xiClamped ).transpose() - point;
-        const double    distance  = d.norm() + ( std::abs( xi - xiClamped ) > 1e-12 ? 1e-12 : 0.0 );
+        kFirst = std::max( 0, k - 1 );
+        kLast  = std::min( nBarElements - 1, k + 1 );
+      }
+
+      Partner best;
+      double  bestDistance = std::numeric_limits< double >::infinity();
+      for ( int k = kFirst; k <= kLast; k++ ) {
+        const double xi       = xiOf( k );
+        const double distance = clampedDistance( x, k, xi, point );
         if ( distance < bestDistance ) {
           bestDistance = distance;
-          best         = { k, xiClamped, xi, false, false };
+          best         = { k, std::clamp( xi, -1.0, 1.0 ), xi, false, false };
         }
       }
-      best.beforeStart = best.element == 0 && xiFirst < -1.0 - 1e-12;
-      best.afterEnd    = best.element == nBarElements - 1 && xiLast > 1.0 + 1e-12;
+      best.beforeStart = best.element == 0 && best.xiUnclamped < -1.0 - 1e-12;
+      best.afterEnd    = best.element == nBarElements - 1 && best.xiUnclamped > 1.0 + 1e-12;
       return best;
     }
 
@@ -502,7 +553,9 @@ namespace Marmot::Elements {
         QPStateVarManager sv( states + i * nQp, nQp );
 
         const VectorDim xc      = qp.X + Uhost * qp.hostN.transpose();
-        const Partner   partner = findPartner( x, xc );
+        const Partner   partner = findPartner( x,
+                                             xc,
+                                             exhaustiveSearch ? -1 : static_cast< int >( std::floor( sv.partner ) ) );
 
         if ( ( partner.beforeStart && startIsBarEnd < 0.5 ) || ( partner.afterEnd && endIsBarEnd < 0.5 ) )
           throw std::runtime_error( MakeString() << "EmbeddedLargeSlipBondElement " << elLabel
@@ -568,12 +621,38 @@ namespace Marmot::Elements {
       Eigen::Map< Eigen::VectorXd >             Pe( Pe_, nDofs );
       Eigen::Map< Eigen::MatrixXd >             Ke( Ke_, nDofs, nDofs );
 
-      // the tangent by central differences, each evaluation from the states at the beginning of the increment
+      // the internal forces and the updated states
       const std::vector< double > statesOld( stateVars_, stateVars_ + nStateVars_ );
-      std::vector< double >       scratch( nStateVars_ );
-      Eigen::VectorXd             Q = QTotal, Pplus, Pminus;
-      const double                h = 1e-7 * characteristicLength_;
-      for ( int j = 0; j < nDofs; j++ ) {
+      Eigen::VectorXd             P;
+      evaluate( QTotal, P, stateVars_, time, dT );
+      Pe += P;
+
+      // the tangent by central differences, each evaluation from the states at the beginning of the increment. The
+      // forces depend only on the host dofs and on the nodes of the partner elements of the channel points; their
+      // neighbors are perturbed as well, as a perturbation may move a partner across an element end.
+      std::vector< int > dofs;
+      for ( int j = 0; j < nHostNodes * nDim; j++ )
+        dofs.push_back( j );
+      std::vector< bool > chainNodeUsed( nChainNodes, false );
+      const int           nQp = nStateVars_ / static_cast< int >( qps.size() );
+      for ( size_t i = 0; i < qps.size(); i++ ) {
+        const int k = std::clamp( static_cast< int >(
+                                    std::floor( QPStateVarManager( stateVars_ + i * nQp, nQp ).partner ) ),
+                                  0,
+                                  nBarElements - 1 );
+        for ( int kk = std::max( 0, k - 1 ); kk <= std::min( nBarElements - 1, k + 1 ); kk++ )
+          for ( int node : barElementNodes( kk ) )
+            chainNodeUsed[node] = true;
+      }
+      for ( int node = 0; node < nChainNodes; node++ )
+        if ( chainNodeUsed[node] || fullTangent )
+          for ( int d = 0; d < nDim; d++ )
+            dofs.push_back( ( nHostNodes + node ) * nDim + d );
+
+      std::vector< double > scratch( nStateVars_ );
+      Eigen::VectorXd       Q = QTotal, Pplus, Pminus;
+      const double          h = 1e-7 * characteristicLength_;
+      for ( int j : dofs ) {
         Q( j )  = QTotal( j ) + h;
         scratch = statesOld;
         evaluate( Q, Pplus, scratch.data(), time, dT );
@@ -583,10 +662,6 @@ namespace Marmot::Elements {
         Q( j ) = QTotal( j );
         Ke.col( j ) += ( Pplus - Pminus ) / ( 2 * h );
       }
-
-      Eigen::VectorXd P;
-      evaluate( QTotal, P, stateVars_, time, dT );
-      Pe += P;
     }
 
     void computeKernelsExplicit( const double* QTotal_, const double*, double* Pe_, double time, double dT ) override

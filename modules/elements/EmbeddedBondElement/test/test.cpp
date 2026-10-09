@@ -1,4 +1,5 @@
 #include "Marmot/EmbeddedBondElement.h"
+#include "Marmot/EmbeddedLargeSlipBondElement.h"
 #include "Marmot/MarmotElementFactory.h"
 #include "Marmot/MarmotJournal.h"
 #include "Marmot/MarmotTesting.h"
@@ -336,6 +337,54 @@ void testLargeSlipUnequalBarElements()
                            MakeString() << "bar force " << barForce << " != Kt d p L = " << -100. * d );
 }
 
+/// the local partner search (walking from the previous partner) and the tangent restricted to the host dofs and the
+/// partner element neighborhoods give the same forces and tangent as the exhaustive search over the window and the
+/// full central difference tangent, for a zig-zag chain of 8 bar elements slid over several bar elements in
+/// increments of up to 2.3 bar elements (the partner jumps across elements and kinks) with a transverse host motion
+void testLargeSlipLocalSearchEqualsExhaustive()
+{
+  std::vector< double > chain;
+  for ( int i = 0; i <= 8; i++ )
+    chain.insert( chain.end(), { -3.0 + i, 1.5 + ( i % 2 ? 0.06 : -0.04 ) } );
+  // channel in bar element 4 (x = 1 .. 2), the window is the whole chain
+  const std::vector< double > props = { 1.2, 4.1, 4.9, 1.0, 1.0, 3 };
+  Bond                        fast( "EBLS2D2Q8W8", concat( quad8, chain ), props, "MODELCODE2010BONDSLIP", mc2010 );
+  Bond  reference( "EBLS2D2Q8W8", concat( quad8, chain ), props, "MODELCODE2010BONDSLIP", mc2010 );
+  auto* ref = dynamic_cast< Marmot::Elements::EmbeddedLargeSlipBondElement< 2, 8, 2 >* >( reference.element.get() );
+  throwExceptionOnFailure( ref != nullptr, "EBLS2D2Q8W8 must be an EmbeddedLargeSlipBondElement<2, 8, 2>" );
+  ref->exhaustiveSearch = true;
+  ref->fullTangent      = true;
+
+  Eigen::VectorXd UOld = Eigen::VectorXd::Zero( fast.nDof );
+  // slides per increment of a quarter element, and one jump of 2.3 elements (the walk must find the partner)
+  const std::vector< double > slides = { 0.25, 0.5, 2.8, 2.85, 2.9, 2.95, 3.0 };
+  for ( int step = 1; step <= static_cast< int >( slides.size() ); step++ ) {
+    Eigen::VectorXd U = Eigen::VectorXd::Zero( fast.nDof );
+    for ( int n = 0; n < 9; n++ ) {
+      U( 16 + 2 * n )     = -slides[step - 1];           // the bar slides backwards along x
+      U( 16 + 2 * n + 1 ) = 0.01 * std::sin( step + n ); // and wiggles
+    }
+    for ( int a = 0; a < 8; a++ )
+      U( 2 * a + 1 ) = 0.02 * step; // the host moves transversally
+    const auto [PFast, KFast] = fast.kernels( U, UOld, true );
+    const auto [PRef, KRef]   = reference.kernels( U, UOld, true );
+    throwExceptionOnFailure( checkIfEqual< double >( PFast, PRef, 1e-12 * ( 1.0 + PRef.cwiseAbs().maxCoeff() ) ),
+                             MakeString() << "step " << step << ": forces differ from the exhaustive search" );
+    throwExceptionOnFailure( checkIfEqual< double >( KFast, KRef, 1e-6 * ( 1.0 + KRef.cwiseAbs().maxCoeff() ) ),
+                             MakeString() << "step " << step << ": tangent differs from the full tangent, max diff "
+                                          << ( KFast - KRef ).cwiseAbs().maxCoeff() );
+    throwExceptionOnFailure( checkIfEqual( *fast.element->getStateView( "partner", 1 ).stateLocation,
+                                           *reference.element->getStateView( "partner", 1 ).stateLocation,
+                                           1e-12 ),
+                             MakeString() << "step " << step << ": partner differs" );
+    UOld = U;
+  }
+  // the bar has slid by 3.0: the partner of the middle channel point (c = 4.5) is now near c = 4.5 + 3.0
+  const double partner = *fast.element->getStateView( "partner", 1 ).stateLocation;
+  throwExceptionOnFailure( std::abs( partner - 7.5 ) < 0.05,
+                           MakeString() << "partner " << partner << " should have moved by 3 elements" );
+}
+
 void testFactoryNames()
 {
   for ( const auto& name : { "EB2D2Q4",
@@ -372,6 +421,7 @@ int main()
     testLargeSlipWindowExceededThrows,
     testLargeSlipTangent3D,
     testLargeSlipUnequalBarElements,
+    testLargeSlipLocalSearchEqualsExhaustive,
   } );
   return 0;
 }
