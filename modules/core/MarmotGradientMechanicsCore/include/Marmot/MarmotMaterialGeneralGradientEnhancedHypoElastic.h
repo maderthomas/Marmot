@@ -130,6 +130,16 @@ public:
     /// @brief Second derivative of nonlocal interaction parameters with respect to nonlocal variables.
     Eigen::Matrix< double, nNonlocalVariables, nNonlocalVariables >
       d2cddK2 = Eigen::Matrix< double, nNonlocalVariables, nNonlocalVariables >::Zero();
+    /**
+     * @brief Derivative of the nonlocal interaction parameters with respect to the strain increment.
+     * @details Nonzero for interactions that depend on the local state, e.g. a localizing gradient damage model with
+     * \f$ c = l^2 g(\omega) \f$ and \f$ \omega \f$ depending on the local damage driving variable (over-nonlocal
+     * weighting). The element adds \f$ \nabla N^T \nabla N \, \bar{\boldsymbol{q}} \, \partial c / \partial
+     * \boldsymbol{\varepsilon} \, \boldsymbol{B} \f$ to the nonlocal-displacement block. Zero (the default) for
+     * constant or purely nonlocal interactions, which keeps every existing material unchanged. Appended last, so
+     * positional aggregate initializations of the other members stay valid.
+     */
+    Eigen::Matrix< double, nNonlocalVariables, 6 > dcddStrain = Eigen::Matrix< double, nNonlocalVariables, 6 >::Zero();
   };
 
   /**

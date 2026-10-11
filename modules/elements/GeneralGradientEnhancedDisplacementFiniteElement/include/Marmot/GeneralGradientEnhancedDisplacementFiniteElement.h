@@ -408,6 +408,42 @@ namespace Marmot::Elements {
     void computeKernels( const double* QTotal, const double* dQ, double* Pe, double* Ke, double time, double dT );
 
     /**
+     * @brief Condense the out-of-plane strain into the nonlocal couplings of a plane stress tangent.
+     * @param[in,out] tan The 3D algorithmic tangents at the converged plane stress state.
+     * @details The plane stress wrapper determines \f$ \varepsilon_{33} \f$ such that \f$ \sigma_{33} = 0 \f$, so
+     * \f$ \mathrm{d}\varepsilon_{33} = -( C_{3j}\, \mathrm{d}\varepsilon_j + \partial \sigma_{33}/\partial \bar K\,
+     * \mathrm{d}\bar K ) / C_{33} \f$. The in-plane stiffness is condensed by
+     * ContinuumMechanics::PlaneStress::getPlaneStressTangent(); the couplings \f$ \partial \sigma / \partial \bar K
+     * \f$, \f$ \partial K_\mathrm{loc} / \partial \varepsilon \f$, \f$ \partial K_\mathrm{loc} / \partial \bar K
+     * \f$, \f$ \partial c / \partial \varepsilon \f$ and \f$ \partial c / \partial \bar K \f$ need the same chain
+     * rule through \f$ \varepsilon_{33} \f$. Without it the element tangent is inconsistent whenever the local driving
+     * variable depends on \f$ \varepsilon_{33} \f$ (e.g. plastic strain driven damage), which costs Newton
+     * iterations in softening. Does nothing if \f$ C_{33} \f$ vanishes.
+     */
+    template < typename Tangents >
+    static void condensePlaneStressNonlocalTangents( Tangents& tan )
+    {
+      const double C33 = tan.dStressddStrain( 2, 2 );
+      if ( !std::isfinite( C33 ) || std::abs( C33 ) < 1e-300 )
+        return;
+
+      // d eps33 / d eps_j (j != 2) and d eps33 / d K_m
+      Eigen::Matrix< double, 1, 6 > dE33_dE                        = -tan.dStressddStrain.row( 2 ) / C33;
+      dE33_dE( 2 )                                                 = 0.0;
+      const Eigen::Matrix< double, 1, nNonlocalVariables > dE33_dK = -tan.dStressddK.row( 2 ) / C33;
+
+      const Eigen::Matrix< double, 6, 1 >                  dS_dE33  = tan.dStressddStrain.col( 2 );
+      const Eigen::Matrix< double, nNonlocalVariables, 1 > dKL_dE33 = tan.dKLocalddStrain.col( 2 );
+      const Eigen::Matrix< double, nNonlocalVariables, 1 > dc_dE33  = tan.dcddStrain.col( 2 );
+
+      tan.dStressddK += dS_dE33 * dE33_dK;
+      tan.dKLocalddK += dKL_dE33 * dE33_dK;
+      tan.dcddK += dc_dE33 * dE33_dK;
+      tan.dKLocalddStrain += dKL_dE33 * dE33_dE;
+      tan.dcddStrain += dc_dE33 * dE33_dE;
+    }
+
+    /**
      * @brief Compute internal force without tangents.
      * @details Uses the small-strain relation \f$\Delta \eps = \mathbf{B}\, \Delta \mathbf{\qu}\f$,
      * interpolates the non-local variables as \f$ \knl = \Nk\, \mathbf{\qk}\f$. Internal forces
@@ -892,6 +928,7 @@ namespace Marmot::Elements {
           qp.material->computePlaneStress( res, tan, inc );
           S = ContinuumMechanics::VoigtNotation::voigtToPlaneVoigt( res.stress );
           C = ContinuumMechanics::PlaneStress::getPlaneStressTangent( tan.dStressddStrain );
+          condensePlaneStressNonlocalTangents( tan );
         }
         else if ( sectionType == SectionType::PlaneStrain ) {
           qp.material->computeStress( res, tan, inc );
@@ -917,7 +954,14 @@ namespace Marmot::Elements {
             tan.dKLocalddStrain.row( n ).transpose() );
 
           kUK.block( 0, idx, sizeDoFU, nNonLocalNodes ) += B.transpose() * dSdK * N_K * qp.J0xW;
-          kKU.block( idx, 0, nNonLocalNodes, sizeDoFU ) += N_K.transpose() * -dK_Local_dDE.transpose() * B * qp.J0xW;
+          const auto dc_dDE = ContinuumMechanics::VoigtNotation::voigtToPlaneVoigt(
+            tan.dcddStrain.row( n ).transpose() );
+
+          kKU.block( idx, 0, nNonLocalNodes, sizeDoFU ) += ( N_K.transpose() * -dK_Local_dDE.transpose() +
+                                                             dNdX_K.transpose() * dNdX_K *
+                                                               qK.segment( idx, nNonLocalNodes ) *
+                                                               dc_dDE.transpose() ) *
+                                                           B * qp.J0xW;
           kKK.block( idx, idx, nNonLocalNodes, nNonLocalNodes ) += ( N_K.transpose() * N_K +
                                                                      res.c( n ) * dNdX_K.transpose() * dNdX_K +
                                                                      tan.dcddK( n ) * dNdX_K.transpose() * dNdX_K *
@@ -949,8 +993,11 @@ namespace Marmot::Elements {
                                                  qp.J0xW;
 
             kUK.block( 0, idx, sizeDoFU, nNonLocalNodes ) += B.transpose() * tan.dStressddK.col( n ) * N_K * qp.J0xW;
-            kKU.block( idx, 0, nNonLocalNodes, sizeDoFU ) += N_K.transpose() * -tan.dKLocalddStrain.row( n ) * B *
-                                                             qp.J0xW;
+            kKU.block( idx, 0, nNonLocalNodes, sizeDoFU ) += ( N_K.transpose() * -tan.dKLocalddStrain.row( n ) +
+                                                               dNdX_K.transpose() * dNdX_K *
+                                                                 qK.segment( idx, nNonLocalNodes ) *
+                                                                 tan.dcddStrain.row( n ) ) *
+                                                             B * qp.J0xW;
 
             kKK.block( idx, idx, nNonLocalNodes, nNonLocalNodes ) += ( N_K.transpose() * N_K +
                                                                        res.c( n ) * dNdX_K.transpose() * dNdX_K +
