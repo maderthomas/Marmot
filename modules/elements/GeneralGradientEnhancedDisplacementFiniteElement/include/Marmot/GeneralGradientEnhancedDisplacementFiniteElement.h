@@ -444,6 +444,37 @@ namespace Marmot::Elements {
     }
 
     /**
+     * @brief Add the couplings between different nonlocal fields to the nonlocal-nonlocal block.
+     * @details For \f$ n \neq m \f$: \f$ \int [ \partial c_n / \partial \bar K_m \, \nabla N^T \nabla N \,
+     * \bar{\boldsymbol q}_n N - N^T \partial K_{\mathrm{loc},n} / \partial \bar K_m N ] \f$, e.g. a second field
+     * whose local driving variable depends on the damage of the first one. Nothing for a single nonlocal field, so
+     * the one-field elements stay unchanged to the bit.
+     */
+    template < typename KKBlock, typename Tangents, typename QK >
+    static void addNonlocalCrossCouplings( KKBlock&           kKK,
+                                           const Tangents&    tan,
+                                           const NSizedK&     N_K,
+                                           const dNdXiSizedK& dNdX_K,
+                                           const QK&          qK,
+                                           const double       J0xW )
+    {
+      if constexpr ( nNonlocalVariables > 1 ) {
+        for ( int n = 0; n < nNonlocalVariables; n++ )
+          for ( int m = 0; m < nNonlocalVariables; m++ ) {
+            if ( m == n )
+              continue;
+            const Eigen::Index idxN = n * nNonLocalNodes, idxM = m * nNonLocalNodes;
+            kKK.block( idxN, idxM, nNonLocalNodes, nNonLocalNodes ) += ( tan.dcddK( n, m ) * dNdX_K.transpose() *
+                                                                           dNdX_K * qK.segment( idxN, nNonLocalNodes ) *
+                                                                           N_K -
+                                                                         N_K.transpose() * tan.dKLocalddK( n, m ) *
+                                                                           N_K ) *
+                                                                       J0xW;
+          }
+      }
+    }
+
+    /**
      * @brief Compute internal force without tangents.
      * @details Uses the small-strain relation \f$\Delta \eps = \mathbf{B}\, \Delta \mathbf{\qu}\f$,
      * interpolates the non-local variables as \f$ \knl = \Nk\, \mathbf{\qk}\f$. Internal forces
@@ -964,11 +995,12 @@ namespace Marmot::Elements {
                                                            B * qp.J0xW;
           kKK.block( idx, idx, nNonLocalNodes, nNonLocalNodes ) += ( N_K.transpose() * N_K +
                                                                      res.c( n ) * dNdX_K.transpose() * dNdX_K +
-                                                                     tan.dcddK( n ) * dNdX_K.transpose() * dNdX_K *
+                                                                     tan.dcddK( n, n ) * dNdX_K.transpose() * dNdX_K *
                                                                        qK.segment( idx, nNonLocalNodes ) * N_K -
                                                                      N_K.transpose() * tan.dKLocalddK( n, n ) * N_K ) *
                                                                    qp.J0xW;
         }
+        addNonlocalCrossCouplings( kKK, tan, N_K, dNdX_K, qK, qp.J0xW );
       }
 
       else if ( nDim == 3 ) {
@@ -1001,12 +1033,13 @@ namespace Marmot::Elements {
 
             kKK.block( idx, idx, nNonLocalNodes, nNonLocalNodes ) += ( N_K.transpose() * N_K +
                                                                        res.c( n ) * dNdX_K.transpose() * dNdX_K +
-                                                                       tan.dcddK( n ) * dNdX_K.transpose() * dNdX_K *
+                                                                       tan.dcddK( n, n ) * dNdX_K.transpose() * dNdX_K *
                                                                          qK.segment( idx, nNonLocalNodes ) * N_K -
                                                                        N_K.transpose() * tan.dKLocalddK( n, n ) *
                                                                          N_K ) *
                                                                      qp.J0xW;
           }
+          addNonlocalCrossCouplings( kKK, tan, N_K, dNdX_K, qK, qp.J0xW );
         }
         else
           throw std::invalid_argument( "Invalid section type for 3D element! Must be Solid" );
