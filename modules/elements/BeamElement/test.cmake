@@ -6,3 +6,6 @@ add_marmot_test("TestBeamElement" "${CURR_TEST_SOURCE_DIR}/test.cpp" REQUIRES Li
 
 # Tests for the co-rotational beam BE2D2CR
 add_marmot_test("TestCorotationalBeamElement" "${CURR_TEST_SOURCE_DIR}/testCorotational.cpp" REQUIRES LinearElastic VonMises)
+
+# Tests for the co-rotational beam BE3D2CR
+add_marmot_test("TestCorotationalBeamElement3D" "${CURR_TEST_SOURCE_DIR}/testCorotational3D.cpp" REQUIRES LinearElastic VonMises)
