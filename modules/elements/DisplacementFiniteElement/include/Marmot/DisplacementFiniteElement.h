@@ -77,6 +77,7 @@ namespace Marmot::Elements {
       PlaneStress,
       PlaneStrain,
       Solid,
+      Axisymmetric, ///< 2D (r, z) meridian section; element property 0 = revolved angle (2 pi = full ring)
     };
 
     static constexpr int sizeLoadVector = nNodes * nDim;
@@ -148,6 +149,11 @@ namespace Marmot::Elements {
        * speed at a ZERO non-local field.
        */
       double referenceWaveSpeed = 0.0;
+
+      /// Axisymmetric section only: radius r of the quadrature point and hoop strain row N_i / r
+      /// (acting on the radial displacement of node i).
+      double                             radius  = 0.0;
+      Eigen::Matrix< double, 1, nNodes > hoopRow = Eigen::Matrix< double, 1, nNodes >::Zero();
 
       /**
        * @brief Manager for per-quadrature-point state variables.
@@ -672,6 +678,17 @@ namespace Marmot::Elements {
       if constexpr ( nDim == 2 ) {
         const double& thickness = elementProperties[0];
         qp.J0xW                 = qp.weight * qp.detJ * thickness;
+        if ( sectionType == SectionType::Axisymmetric ) {
+          // thickness = revolved angle; dV = angle * r * dr dz
+          const auto N = this->N( qp.xi );
+          qp.radius    = 0.0;
+          for ( int i = 0; i < nNodes; i++ )
+            qp.radius += N( i ) * this->coordinates( i * nDim );
+          if ( qp.radius <= 0.0 )
+            throw std::invalid_argument( "Axisymmetric element: quadrature point radius <= 0" );
+          qp.hoopRow = N / qp.radius;
+          qp.J0xW *= qp.radius;
+        }
       }
       if constexpr ( nDim == 1 ) {
         const double& crossSection = elementProperties[0];
@@ -753,6 +770,47 @@ namespace Marmot::Elements {
           dissipation                 = state.dissipation;
         }
 
+        else if ( sectionType == SectionType::Axisymmetric ) {
+          // Voigt (rr, zz, rz) of the plane B plus the hoop strain u_r / r -> 3D (11=rr, 22=zz, 33=tt, 12=rz)
+          double dHoop = 0.0;
+          for ( int i = 0; i < nNodes; i++ )
+            dHoop += qp.hoopRow( i ) * dQ( i * nDim );
+          Vector6d dE6 = planeVoigtToVoigt( dE );
+          dE6( 2 )     = dHoop;
+          Matrix6d C66;
+
+          MarmotMaterialHypoElastic::state3D  state;
+          MarmotMaterialHypoElastic::timeInfo timeInfo;
+          state.stress               = qp.managedStateVars->stress;
+          state.elasticEnergyDensity = elasticEnergyDensity;
+          state.dissipation          = dissipation;
+          state.stateVars            = qp.managedStateVars->materialStateVars.data();
+          timeInfo.time              = time;
+          timeInfo.dT                = dT;
+          qp.material->computeStress( state, C66, dE6, timeInfo );
+          qp.managedStateVars->stress = state.stress;
+
+          // B4 rows: rr, zz, tt, rz
+          Eigen::Matrix< double, 4, nNodes * nDim > B4 = Eigen::Matrix< double, 4, nNodes * nDim >::Zero();
+          B4.row( 0 )                                  = B.row( 0 );
+          B4.row( 1 )                                  = B.row( 1 );
+          for ( int i = 0; i < nNodes; i++ )
+            B4( 2, i * nDim ) = qp.hoopRow( i );
+          B4.row( 3 )               = B.row( 2 );
+          const Eigen::Vector4d S4  = state.stress.head( 4 );
+          const Eigen::Matrix4d C44 = C66.topLeftCorner( 4, 4 );
+
+          elasticEnergyDensity                     = state.elasticEnergyDensity;
+          dissipation                              = state.dissipation;
+          qp.managedStateVars->elasticStrainEnergy = elasticEnergyDensity * qp.J0xW;
+          qp.managedStateVars->dissipation         = dissipation * qp.J0xW;
+          qp.managedStateVars->totalStrainEnergy   = ( elasticEnergyDensity + dissipation ) * qp.J0xW;
+          qp.managedStateVars->strain += dE6;
+          Ke += B4.transpose() * C44 * B4 * qp.J0xW;
+          Pe += B4.transpose() * S4 * qp.J0xW;
+          continue;
+        }
+
         else if ( sectionType == SectionType::PlaneStrain ) {
 
           Vector6d dE6 = planeVoigtToVoigt( dE );
@@ -827,6 +885,10 @@ namespace Marmot::Elements {
     Map< const RhsSized > QTotal( QTotal_ );
     Map< const RhsSized > dQ( dQ_ );
     Map< RhsSized >       Pe( Pe_ );
+
+    if constexpr ( nDim == 2 )
+      if ( sectionType == SectionType::Axisymmetric )
+        throw std::invalid_argument( "DisplacementFiniteElement: Axisymmetric section has no explicit kernel" );
 
     Voigt S  = Voigt::Zero();
     Voigt dE = Voigt::Zero();

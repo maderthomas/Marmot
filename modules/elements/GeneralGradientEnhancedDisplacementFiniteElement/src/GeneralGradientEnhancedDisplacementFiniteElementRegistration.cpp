@@ -98,6 +98,19 @@ namespace Marmot::Elements::Registration {
                        ReducedIntegration,
                        GeneralGradientEnhancedDisplacementFiniteElement< 2, 8, 2 >::PlaneStrain >() );
 
+  const static bool GCAX8R_isRegistered = MarmotElementFactory::
+    registerElement( "GCAX8R",
+                     makeFactoryFunction< GeneralGradientEnhancedDisplacementFiniteElement< 2, 8 >,
+                                          ReducedIntegration,
+                                          GeneralGradientEnhancedDisplacementFiniteElement< 2, 8 >::Axisymmetric >() );
+
+  const static bool G2GCAX8R_isRegistered = MarmotElementFactory::
+    registerElement( "G2GCAX8R",
+                     makeFactoryFunction<
+                       GeneralGradientEnhancedDisplacementFiniteElement< 2, 8, 2 >,
+                       ReducedIntegration,
+                       GeneralGradientEnhancedDisplacementFiniteElement< 2, 8, 2 >::Axisymmetric >() );
+
   const static bool G2GC3D8_isRegistered = MarmotLibrary::MarmotElementFactory::
     registerElement( "G2GC3D8",
                      makeFactoryFunction<

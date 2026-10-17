@@ -78,6 +78,7 @@ namespace Marmot::Elements {
       PlaneStress,
       PlaneStrain,
       Solid,
+      Axisymmetric, ///< 2D (r, z) meridian section; element property 0 = revolved angle (2 pi = full ring)
     };
 
     static constexpr int nDofPerNodeU = nDim;
@@ -140,6 +141,7 @@ namespace Marmot::Elements {
       double      detJ;
       double      J0xW;
       NSized      N;
+      double      radius = 0.0; ///< Axisymmetric section only: radius r of the quadrature point
       dNdXiSized  dNdX;
       BSized      B;
       NSizedK     N_K;
@@ -879,6 +881,15 @@ namespace Marmot::Elements {
       if constexpr ( nDim == 2 ) {
         const double& thickness = elementProperties[0];
         qp.J0xW                 = qp.weight * qp.detJ * thickness;
+        if ( sectionType == SectionType::Axisymmetric ) {
+          // thickness = revolved angle; dV = angle * r * dr dz
+          qp.radius = 0.0;
+          for ( int i = 0; i < nNodes; i++ )
+            qp.radius += qp.N( i ) * localGeometryElement.coordinates( i * nDim );
+          if ( qp.radius <= 0.0 )
+            throw std::invalid_argument( "Axisymmetric element: quadrature point radius <= 0" );
+          qp.J0xW *= qp.radius;
+        }
       }
       if constexpr ( nDim == 1 ) {
         const double& crossSection = elementProperties[0];
@@ -945,6 +956,65 @@ namespace Marmot::Elements {
       response  res;
       tangents  tan;
       increment inc;
+      if constexpr ( nDim == 2 ) {
+        if ( sectionType == SectionType::Axisymmetric ) {
+          // 4 components (rr, zz, tt, rz) = 3D Voigt (11, 22, 33, 12); the plane B plus the hoop row N_i / r
+          Eigen::Matrix< double, 4, sizeDoFU > B4 = Eigen::Matrix< double, 4, sizeDoFU >::Zero();
+          B4.row( 0 )                             = B.row( 0 );
+          B4.row( 1 )                             = B.row( 1 );
+          for ( int i = 0; i < nNodes; i++ )
+            B4( 2, i * nDim ) = qp.N( i ) / qp.radius;
+          B4.row( 3 ) = B.row( 2 );
+
+          Vector6d dE6             = Vector6d::Zero();
+          dE6.head( 4 )            = B4 * dQU;
+          res.stress               = qp.managedStateVars->stress;
+          res.elasticEnergyDensity = qp.managedStateVars->elasticStrainEnergy / qp.J0xW;
+          res.dissipation          = qp.managedStateVars->dissipation / qp.J0xW;
+          res.stateVars            = qp.managedStateVars->materialStateVars.data();
+          inc                      = { dE6, K, dK, time, dT };
+          qp.material->computeStress( res, tan, inc );
+
+          const Eigen::Vector4d S4  = res.stress.head( 4 );
+          const Eigen::Matrix4d C44 = tan.dStressddStrain.topLeftCorner( 4, 4 );
+          fU += B4.transpose() * S4 * qp.J0xW;
+          kUU += B4.transpose() * C44 * B4 * qp.J0xW;
+
+          for ( int n = 0; n < nNonlocalVariables; n++ ) {
+            Eigen::Index idx = n * nNonLocalNodes;
+            fK.segment( idx, nNonLocalNodes ) += ( N_K.transpose() * K( n ) +
+                                                   res.c( n ) * dNdX_K.transpose() * dNdX_K *
+                                                     qK.segment( idx, nNonLocalNodes ) -
+                                                   N_K.transpose() * res.KLocal( n ) ) *
+                                                 qp.J0xW;
+            const Eigen::Vector4d dSdK         = tan.dStressddK.col( n ).head( 4 );
+            const Eigen::Vector4d dK_Local_dDE = tan.dKLocalddStrain.row( n ).transpose().head( 4 );
+            const Eigen::Vector4d dc_dDE       = tan.dcddStrain.row( n ).transpose().head( 4 );
+
+            kUK.block( 0, idx, sizeDoFU, nNonLocalNodes ) += B4.transpose() * dSdK * N_K * qp.J0xW;
+            kKU.block( idx, 0, nNonLocalNodes, sizeDoFU ) += ( N_K.transpose() * -dK_Local_dDE.transpose() +
+                                                               dNdX_K.transpose() * dNdX_K *
+                                                                 qK.segment( idx, nNonLocalNodes ) *
+                                                                 dc_dDE.transpose() ) *
+                                                             B4 * qp.J0xW;
+            kKK.block( idx, idx, nNonLocalNodes, nNonLocalNodes ) += ( N_K.transpose() * N_K +
+                                                                       res.c( n ) * dNdX_K.transpose() * dNdX_K +
+                                                                       tan.dcddK( n, n ) * dNdX_K.transpose() * dNdX_K *
+                                                                         qK.segment( idx, nNonLocalNodes ) * N_K -
+                                                                       N_K.transpose() * tan.dKLocalddK( n, n ) *
+                                                                         N_K ) *
+                                                                     qp.J0xW;
+          }
+          addNonlocalCrossCouplings( kKK, tan, N_K, dNdX_K, qK, qp.J0xW );
+
+          qp.managedStateVars->stress              = res.stress;
+          qp.managedStateVars->elasticStrainEnergy = res.elasticEnergyDensity * qp.J0xW;
+          qp.managedStateVars->dissipation         = res.dissipation * qp.J0xW;
+          qp.managedStateVars->totalStrainEnergy   = ( res.elasticEnergyDensity + res.dissipation ) * qp.J0xW;
+          qp.managedStateVars->strain += dE6;
+          continue;
+        }
+      }
       if constexpr ( nDim == 2 ) {
         Vector6d dE6             = ContinuumMechanics::VoigtNotation::planeVoigtToVoigt( dE );
         res.stress               = qp.managedStateVars->stress;
@@ -1060,6 +1130,10 @@ namespace Marmot::Elements {
     Map< const RhsSized > QTotal( QTotal_ );
     Map< const RhsSized > dQ( dQ_ );
     Map< RhsSized >       Pe( Pe_ );
+    if constexpr ( nDim == 2 )
+      if ( sectionType == SectionType::Axisymmetric )
+        throw std::invalid_argument(
+          "GeneralGradientEnhancedDisplacementFiniteElement: no explicit axisymmetric kernel" );
 
     // incremental nodal displacements Q and nodal internal parameters qK
     const Ref< const USizedVector > dQU( dQ.head( sizeDoFU ) );
