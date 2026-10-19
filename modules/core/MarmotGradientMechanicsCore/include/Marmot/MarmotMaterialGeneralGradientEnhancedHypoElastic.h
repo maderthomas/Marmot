@@ -398,6 +398,16 @@ public:
     return std::vector< double >( nNonlocalVariables, 0.0 );
   }
 
+  /**
+   * @brief Geometry of the quadrature point's tributary cell, assigned by the element (optional).
+   * @param cellEdges Column-major nDim x nDim matrix; column i = edge vector of the cell along the parent
+   *        coordinate xi_i (for a tensor-product rule with n points per direction: (2/n) dX/dxi_i at the point).
+   * @param nDim Spatial dimension (1, 2 or 3).
+   * @details Default: ignored. Materials with an element-dependent length (e.g. a crack band length, FGCDP
+   * FGCDPELEMENTBAND) override it. Called once per material instance, after the node coordinates are known.
+   */
+  virtual void setQuadraturePointCell( const double* cellEdges, int nDim ) {}
+
 protected:
   /**
    * @brief Validate a micro-inertia against this material's own nonlocal viscosity.

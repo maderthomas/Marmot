@@ -320,6 +320,13 @@ namespace Marmot::Elements {
      */
     double characteristicElementLengthAt( const XiSized& xi );
 
+    /**
+     * @brief Pass the tributary cell of each quadrature point to its material (setQuadraturePointCell): edge vectors
+     * (2/n) dX/dxi_i, n = points per direction of the (tensor-product) rule. Skipped while no material or no node
+     * coordinates are assigned; called from assignProperty( section ) and initializeYourself().
+     */
+    void assignQuadraturePointCells();
+
     /** @brief Provide nodal coordinates to local and non-local geometry elements. */
     void assignNodeCoordinates( const double* coordinates );
 
@@ -688,6 +695,25 @@ namespace Marmot::Elements {
         MarmotLibrary::MarmotMaterialGeneralGradientEnhancedHypoElasticFactory< nNonlocalVariables >::
           createMaterial( section.materialName, section.materialProperties, section.nMaterialProperties, elLabel ) );
     }
+    assignQuadraturePointCells();
+  }
+
+  template < int nDim, int nNodes, int nNonlocalVariables, int nNonLocalNodes >
+  void GeneralGradientEnhancedDisplacementFiniteElement< nDim, nNodes, nNonlocalVariables, nNonLocalNodes >::
+    assignQuadraturePointCells()
+  {
+    if ( qps.empty() || localGeometryElement.coordinates.data() == nullptr ) // node coordinates not assigned yet
+      return;
+    const double nPerDirection = std::round( std::pow( double( qps.size() ), 1.0 / nDim ) );
+    for ( QuadraturePoint& qp : qps ) {
+      if ( !qp.material )
+        continue;
+      const JacobianSized J = localGeometryElement.Jacobian( localGeometryElement.dNdXi( qp.xi ) );
+      if ( !( std::abs( J.determinant() ) > 0 ) )
+        continue;
+      const JacobianSized cell = ( 2.0 / nPerDirection ) * J;
+      qp.material->setQuadraturePointCell( cell.data(), nDim );
+    }
   }
 
   template < int nDim, int nNodes, int nNonlocalVariables, int nNonLocalNodes >
@@ -885,6 +911,7 @@ namespace Marmot::Elements {
         qp.J0xW                    = qp.weight * qp.detJ * crossSection;
       }
     }
+    assignQuadraturePointCells();
   }
 
   template < int nDim, int nNodes, int nNonlocalVariables, int nNonLocalNodes >
