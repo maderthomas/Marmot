@@ -145,6 +145,10 @@ namespace Marmot::Elements {
       NSizedK     N_K;
       dNdXiSizedK dNdX_K;
       BSizedK     B_K;
+      /// Second derivatives of the nonlocal shape functions, row a * nDim + b = d2 N / dX_a dX_b (affine map of the
+      /// natural second derivatives; exact for parallelogram / parallelepiped elements), for the field derivatives
+      /// passed to the material (setNonlocalFieldDerivatives).
+      Matrix< double, nDim * nDim, nNonLocalNodes > d2NdX2_K;
 
       /**
        * @brief The element's smallest physical extent at this quadrature point.
@@ -238,7 +242,8 @@ namespace Marmot::Elements {
           B( BSized::Zero() ),
           N_K( NSizedK::Zero() ),
           dNdX_K( dNdXiSizedK::Zero() ),
-          B_K( BSizedK::Zero() ){};
+          B_K( BSizedK::Zero() ),
+          d2NdX2_K( Matrix< double, nDim * nDim, nNonLocalNodes >::Zero() ){};
     };
 
     /// Quadrature points owned by the element (one per integration point).
@@ -899,6 +904,28 @@ namespace Marmot::Elements {
       qp.dNdX_K                    = nonLocalGeometryElement.dNdX( dNdXi_K, JInv_K );
       qp.B_K                       = nonLocalGeometryElement.B( qp.dNdX_K );
 
+      /* Second derivatives of the nonlocal shape functions: d2N/dxi_k dxi_l by central differences of dNdXi (exact
+       * for the polynomial shape functions up to round-off), mapped with the inverse Jacobian as for an affine
+       * element: d2N/dX_a dX_b = sum_kl JInv(k,a) JInv(l,b) d2N/dxi_k dxi_l. */
+      {
+        const double h = 1e-4;
+        Matrix< double, nDim * nDim, nNonLocalNodes > d2NdXi2;
+        for ( int l = 0; l < nDim; l++ ) {
+          XiSized xiP = qp.xi, xiM = qp.xi;
+          xiP( l ) += h;
+          xiM( l ) -= h;
+          const dNdXiSizedK dP = nonLocalGeometryElement.dNdXi( xiP ), dM = nonLocalGeometryElement.dNdXi( xiM );
+          for ( int k = 0; k < nDim; k++ )
+            d2NdXi2.row( k * nDim + l ) = ( dP.row( k ) - dM.row( k ) ) / ( 2 * h );
+        }
+        qp.d2NdX2_K.setZero();
+        for ( int a = 0; a < nDim; a++ )
+          for ( int b = 0; b < nDim; b++ )
+            for ( int k = 0; k < nDim; k++ )
+              for ( int l = 0; l < nDim; l++ )
+                qp.d2NdX2_K.row( a * nDim + b ) += JInv_K( k, a ) * JInv_K( l, b ) * d2NdXi2.row( k * nDim + l );
+      }
+
       if constexpr ( nDim == 3 ) {
         qp.J0xW = qp.weight * qp.detJ;
       }
@@ -967,6 +994,18 @@ namespace Marmot::Elements {
         Eigen::Index idx = static_cast< Eigen::Index >( n ) * static_cast< Eigen::Index >( nNonLocalNodes );
         K( n )           = N_K * qK.segment( idx, nNonLocalNodes );
         dK( n )          = N_K * dQK.segment( idx, nNonLocalNodes );
+      }
+
+      // spatial derivatives of the nonlocal fields at the point (optional material hook, ignored by default)
+      {
+        Matrix< double, nDim, nNonlocalVariables >        gradK;
+        Matrix< double, nDim * nDim, nNonlocalVariables > hessK;
+        for ( size_t n = 0; n < nNonlocalVariables; n++ ) {
+          Eigen::Index idx = static_cast< Eigen::Index >( n ) * static_cast< Eigen::Index >( nNonLocalNodes );
+          gradK.col( n )   = dNdX_K * qK.segment( idx, nNonLocalNodes );
+          hessK.col( n )   = qp.d2NdX2_K * qK.segment( idx, nNonLocalNodes );
+        }
+        qp.material->setNonlocalFieldDerivatives( gradK.data(), hessK.data(), nDim );
       }
 
       response  res;
@@ -1169,6 +1208,18 @@ namespace Marmot::Elements {
         Eigen::Index idx = static_cast< Eigen::Index >( n ) * static_cast< Eigen::Index >( nNonLocalNodes );
         K( n )           = N_K * qK.segment( idx, nNonLocalNodes );
         dK( n )          = N_K * dQK.segment( idx, nNonLocalNodes );
+      }
+
+      // spatial derivatives of the nonlocal fields at the point (optional material hook, ignored by default)
+      {
+        Matrix< double, nDim, nNonlocalVariables >        gradK;
+        Matrix< double, nDim * nDim, nNonlocalVariables > hessK;
+        for ( size_t n = 0; n < nNonlocalVariables; n++ ) {
+          Eigen::Index idx = static_cast< Eigen::Index >( n ) * static_cast< Eigen::Index >( nNonLocalNodes );
+          gradK.col( n )   = dNdX_K * qK.segment( idx, nNonLocalNodes );
+          hessK.col( n )   = qp.d2NdX2_K * qK.segment( idx, nNonLocalNodes );
+        }
+        qp.material->setNonlocalFieldDerivatives( gradK.data(), hessK.data(), nDim );
       }
 
       response  res;

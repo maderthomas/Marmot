@@ -408,6 +408,19 @@ public:
    */
   virtual void setQuadraturePointCell( const double* cellEdges, int nDim ) {}
 
+  /**
+   * @brief Spatial derivatives of the nonlocal fields at the quadrature point, passed by the element (optional).
+   * @param gradients Column-major nDim x nNonlocalVariables matrix; column n = grad K_n at the point.
+   * @param hessians  nNonlocalVariables consecutive column-major nDim x nDim matrices; block n = grad grad K_n
+   *        (the second derivatives of the interpolated field; an element may pass zeros if it cannot form them).
+   * @param nDim Spatial dimension (1, 2 or 3).
+   * @details Default: ignored. Materials that read the geometry of a nonlocal field (e.g. the normal of a crack band
+   * as the direction of steepest change of the nonlocal crack opening, FGCDP mixed-mode kinematics) override it. The
+   * element calls it before every stress update of the point with the fields of the current iterate; the material
+   * treats the data as given (no tangent with respect to the nodal values is passed back).
+   */
+  virtual void setNonlocalFieldDerivatives( const double* gradients, const double* hessians, int nDim ) {}
+
 protected:
   /**
    * @brief Validate a micro-inertia against this material's own nonlocal viscosity.
