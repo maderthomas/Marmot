@@ -217,6 +217,93 @@ namespace Marmot::Discretizations::Cells {
     /** @} */
 
     /**
+     * @name Optional: a projection with one value per material point
+     * @brief A scalar that the host projects with values per material point, e.g. a nodal (smoothed) volume change
+     * of an F-bar formulation, with the value of every material point interpolated back from the nodes of the grid.
+     *
+     * @details Generalizes the patch projection above: every assigned material point @f$ p @f$ of the cell (in the
+     * order of assignMaterialPoints()) reports its value @f$ v_p(\boldsymbol{Q}) @f$, its weight @f$ w_p @f$ and the
+     * cell basis @f$ N_{A}(\boldsymbol{x}_p) @f$ it uses, and receives a projected value @f$ \bar{v}_p @f$ from the
+     * host. A host with the lumped L2 projection onto the nodes of the grid forms
+     * @f[
+     *   v_a = \frac{\sum_p N_a(\boldsymbol{x}_p)\, w_p\, v_p}{\sum_p N_a(\boldsymbol{x}_p)\, w_p}, \qquad
+     *   \bar{v}_p = \sum_a N_a(\boldsymbol{x}_p)\, v_a ,
+     * @f]
+     * over all material points of all cells sharing node @f$ a @f$, which couples the degrees of freedom of
+     * neighbouring cells. Per evaluation, the host
+     *  1. calls computeMaterialPointProjectionContributions() and getMaterialPointProjectionBasis() on every cell
+     *     (before interpolateFieldsToMaterialPoints(); they change no material point), forms @f$ \bar{v}_p @f$,
+     *  2. passes them with setMaterialPointProjectedValues(), then interpolates, computes the material points and the
+     *     kernels as usual: the cell returns its residual and its tangent at fixed @f$ \bar{v}_p @f$,
+     *  3. assembles the coupling with getMaterialPointProjectionSensitivities(),
+     *     @f$ \sum_p \partial \boldsymbol{R}_c/\partial \bar{v}_p \otimes \partial \bar{v}_p/\partial \boldsymbol{Q}
+     * @f$.
+     *
+     * The default implementations decline (hasMaterialPointProjection() is false) or throw.
+     * @{
+     */
+
+    /**
+     * @brief Whether the cell supports a projection with one value per material point.
+     * @return false (the default).
+     */
+    virtual bool hasMaterialPointProjection() const { return false; }
+
+    /**
+     * @brief The values, weights and derivatives of the assigned material points at the dof vector @p Q; changes no
+     * material point.
+     * @param[in]  Q           Cell dof vector (getNDofPerCell() values).
+     * @param[out] values      @f$ v_p @f$, one per assigned material point.
+     * @param[out] weights     @f$ w_p @f$, one per assigned material point (independent of @p Q).
+     * @param[out] dValues_dQ  @f$ \partial v_p/\partial \boldsymbol{Q} @f$, material point major (getNDofPerCell()
+     *                         values per material point), overwritten.
+     * @throws std::invalid_argument if not supported (default).
+     */
+    virtual void computeMaterialPointProjectionContributions( [[maybe_unused]] const double* Q,
+                                                              [[maybe_unused]] double*       values,
+                                                              [[maybe_unused]] double*       weights,
+                                                              [[maybe_unused]] double*       dValues_dQ ) const
+    {
+      throw std::invalid_argument( Marmot::Utilities::MakeString() << __PRETTY_FUNCTION__ << ": not supported" );
+    }
+
+    /**
+     * @brief The cell basis at the assigned material points, as the cell uses it until the next
+     * assignMaterialPoints().
+     * @param[out] N @f$ N_A(\boldsymbol{x}_p) @f$, material point major (getNNodes() values per material point).
+     * @throws std::invalid_argument if not supported (default).
+     */
+    virtual void getMaterialPointProjectionBasis( [[maybe_unused]] double* N ) const
+    {
+      throw std::invalid_argument( Marmot::Utilities::MakeString() << __PRETTY_FUNCTION__ << ": not supported" );
+    }
+
+    /**
+     * @brief Sets the projected values @f$ \bar{v}_p @f$ the following evaluations use, and switches the cell to this
+     * projection until the next assignMaterialPoints().
+     * @param[in] values One per assigned material point.
+     * @throws std::invalid_argument if not supported (default).
+     */
+    virtual void setMaterialPointProjectedValues( [[maybe_unused]] const double* values )
+    {
+      throw std::invalid_argument( Marmot::Utilities::MakeString() << __PRETTY_FUNCTION__ << ": not supported" );
+    }
+
+    /**
+     * @brief The derivatives of the residual contributions of the cell (computeMaterialPointKernels() and
+     * computeDistributedLoad(), as evaluated since the last interpolateFieldsToMaterialPoints()) w.r.t. the projected
+     * values, in the sign convention of the tangents.
+     * @param[out] dR_dValues @f$ \partial \boldsymbol{R}_c/\partial \bar{v}_p @f$, material point major
+     *                        (getNDofPerCell() values per material point), overwritten.
+     * @throws std::invalid_argument if not supported (default).
+     */
+    virtual void getMaterialPointProjectionSensitivities( [[maybe_unused]] double* dR_dValues ) const
+    {
+      throw std::invalid_argument( Marmot::Utilities::MakeString() << __PRETTY_FUNCTION__ << ": not supported" );
+    }
+    /** @} */
+
+    /**
      * @brief Integrates the internal force vector and its tangent over the assigned material points.
      * @details Uses the material point responses computed in the preceding
      * Marmot::Discretizations::MaterialPoints::MaterialPoint::computeYourself(). Results are added to the output

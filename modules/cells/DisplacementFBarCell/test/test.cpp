@@ -531,10 +531,11 @@ namespace {
   const std::vector< double > j2Props = { 833., 385., 6., 6., 0., 0., 1., 1.0 };
 
   struct Patch {
-    // global nodes (0,0) (2,0) (4,0) (0,1) (2,1) (4,1) (0,2) (2,2); cells [0,1,4,3] [1,2,5,4] [3,4,7,6]
+    // global nodes (0,0) (2,0) (4,0) (0,1) (2,1) (4,1) (0,2) (2,2) (4,2); cells [0,1,4,3] [1,2,5,4] [3,4,7,6]
+    // and, with 4 cells, [4,5,8,7] with a single material point
     std::vector< double >                                                                    X;
     std::vector< std::array< int, 4 > >                                                      conn;
-    std::array< std::vector< double >, 3 >                                                   cellNodes;
+    std::array< std::vector< double >, 4 >                                                   cellNodes;
     std::vector< std::unique_ptr< Marmot::Discretizations::Cells::Cell > >                   cells;
     std::vector< std::vector< Marmot::Discretizations::MaterialPoints::MaterialPoint* > >    cellMps;
     std::vector< std::unique_ptr< Marmot::Discretizations::MaterialPoints::MaterialPoint > > mps;
@@ -542,13 +543,16 @@ namespace {
     std::unique_ptr< Marmot::Discretizations::MaterialSection >                              section;
     int                                                                                      nDof;
     bool                                                                                     patch;
+    bool                                                                                     nodal;
+    std::vector< double > projected; // nodal host: the projected volume changes of the last evaluation (MP order)
 
-    Patch( int nCells, bool plastic, bool patchMode = true, bool fBar = true ) : patch( patchMode )
+    Patch( int nCells, bool plastic, bool patchMode = true, bool fBar = true, bool nodalMode = false )
+      : patch( patchMode && !nodalMode ), nodal( nodalMode )
     {
-      X    = { 0, 0, 2, 0, 4, 0, 0, 1, 2, 1, 4, 1, 0, 2, 2, 2 };
-      conn = { { 0, 1, 4, 3 }, { 1, 2, 5, 4 }, { 3, 4, 7, 6 } };
+      X    = { 0, 0, 2, 0, 4, 0, 0, 1, 2, 1, 4, 1, 0, 2, 2, 2, 4, 2 };
+      conn = { { 0, 1, 4, 3 }, { 1, 2, 5, 4 }, { 3, 4, 7, 6 }, { 4, 5, 8, 7 } };
       conn.resize( nCells );
-      nDof = 16;
+      nDof = nCells == 4 ? 18 : 16;
       section.reset( plastic ? new Marmot::Discretizations::MaterialSection( "FINITESTRAINJ2PLASTICITY",
                                                                              j2Props.data(),
                                                                              (int)j2Props.size() )
@@ -559,7 +563,8 @@ namespace {
       const std::vector< std::vector< std::array< double, 2 > > > fractions =
         { { { 0.80, 0.60 }, { 0.65, 0.85 }, { 0.9, 0.9 } },
           { { 0.2, 0.3 }, { 0.7, 0.2 }, { 0.3, 0.75 }, { 0.8, 0.8 } },
-          { { 0.15, 0.85 }, { 0.3, 0.6 } } };
+          { { 0.15, 0.85 }, { 0.3, 0.6 } },
+          { { 0.35, 0.4 } } };
       int label_ = 1;
       for ( int c = 0; c < nCells; c++ ) {
         auto& nodes = cellNodes[c]; // the cell keeps a view of its node coordinates
@@ -626,6 +631,53 @@ namespace {
         if ( JA )
           *JA = v / w;
       }
+      // nodal host: lumped L2 projection of the values onto the nodes, interpolated back to the material points
+      std::vector< Eigen::MatrixXd > dvbar( cells.size() ); // per cell: d vbar_p/dU (global), one row per MP
+      if ( nodal ) {
+        const int                      nNodesG = nDof / 2;
+        Eigen::VectorXd                W = Eigen::VectorXd::Zero( nNodesG ), Vn = Eigen::VectorXd::Zero( nNodesG );
+        Eigen::MatrixXd                G = Eigen::MatrixXd::Zero( nNodesG, nDof );
+        std::vector< Eigen::VectorXd > Ns( cells.size() );
+        for ( size_t c = 0; c < cells.size(); c++ ) {
+          const int       nP = static_cast< int >( cellMps[c].size() );
+          Eigen::VectorXd vals( nP ), wts( nP ), dvc( 8 * nP ), N( 4 * nP );
+          cells[c]->computeMaterialPointProjectionContributions( gather( U, c ).data(),
+                                                                 vals.data(),
+                                                                 wts.data(),
+                                                                 dvc.data() );
+          cells[c]->getMaterialPointProjectionBasis( N.data() );
+          Ns[c] = N;
+          for ( int p = 0; p < nP; p++ )
+            for ( int A = 0; A < 4; A++ ) {
+              const int    a  = conn[c][A];
+              const double Nw = N( 4 * p + A ) * wts( p );
+              W( a ) += Nw;
+              Vn( a ) += Nw * vals( p );
+              for ( int B = 0; B < 4; B++ )
+                G.block< 1, 2 >( a, 2 * conn[c][B] ) += Nw * dvc.segment< 2 >( 8 * p + 2 * B ).transpose();
+            }
+        }
+        for ( int a = 0; a < nNodesG; a++ )
+          if ( W( a ) > 0 ) {
+            Vn( a ) /= W( a );
+            G.row( a ) /= W( a );
+          }
+        projected.clear();
+        for ( size_t c = 0; c < cells.size(); c++ ) {
+          const int       nP = static_cast< int >( cellMps[c].size() );
+          Eigen::VectorXd vbar( nP );
+          dvbar[c] = Eigen::MatrixXd::Zero( nP, nDof );
+          for ( int p = 0; p < nP; p++ ) {
+            vbar( p ) = 0;
+            for ( int A = 0; A < 4; A++ ) {
+              vbar( p ) += Ns[c]( 4 * p + A ) * Vn( conn[c][A] );
+              dvbar[c].row( p ) += Ns[c]( 4 * p + A ) * G.row( conn[c][A] );
+            }
+            projected.push_back( vbar( p ) );
+          }
+          cells[c]->setMaterialPointProjectedValues( vbar.data() );
+        }
+      }
       for ( auto& mp : mps )
         mp->prepareYourself( 1.0, 1.0 );
       for ( size_t c = 0; c < cells.size(); c++ )
@@ -649,6 +701,17 @@ namespace {
         }
         if ( patch )
           K += aG * dv.transpose();
+        if ( nodal ) {
+          const int       nP = static_cast< int >( cellMps[c].size() );
+          Eigen::VectorXd S( 8 * nP );
+          cells[c]->getMaterialPointProjectionSensitivities( S.data() );
+          for ( int p = 0; p < nP; p++ ) {
+            Eigen::VectorXd sG = Eigen::VectorXd::Zero( nDof );
+            for ( int A = 0; A < 4; A++ )
+              sG.segment< 2 >( 2 * conn[c][A] ) += S.segment< 2 >( 8 * p + 2 * A );
+            K += sG * dvbar[c].row( p );
+          }
+        }
       }
       return { P, K };
     }
@@ -789,6 +852,116 @@ namespace {
     }
   }
 
+  // ---------------------------------------------------------------------------------------------------------------
+  // nodal F-bar: lumped L2 projection of det dF_p onto the shared nodes, interpolated back per material point
+
+  void checkNodal()
+  {
+    for ( int nCells : { 1, 3, 4 } )
+      for ( bool plastic : { false, true } )
+        for ( bool afterStep : { false, true } ) {
+          const std::string what = Marmot::Utilities::MakeString()
+                                   << "DisplacementFBar/Quad4 nodal F-bar on " << nCells << " cell(s), "
+                                   << ( plastic ? "J2 plastic" : "elastic" ) << ( afterStep ? ", second" : ", first" )
+                                   << " step";
+          Patch        s( nCells, plastic, false, true, true );
+          const double scale = plastic ? 0.25 : 1.0;
+          if ( afterStep )
+            s.accept( increment( s.nDof, 0.03 * scale ) );
+          const Eigen::VectorXd U      = increment( s.nDof, ( afterStep ? 0.02 : 0.04 ) * scale );
+          const auto [P, K]            = s.trial( U );
+          const auto            backup = s.stateVars;
+          std::vector< double > alphaPn;
+          if ( plastic )
+            for ( auto& mp : s.mps )
+              alphaPn.push_back( mp->getStateView( "alphaP" ).stateLocation[0] );
+          s.kernels( U ); // the state of the trial, to read the volume changes
+          double vBar = 0, vOwn = 0;
+          for ( size_t k = 0; k < s.mps.size(); k++ ) {
+            throwExceptionOnFailure( std::abs( s.volumeChange( k ) - s.projected[k] ) < 1e-13,
+                                     what + ": every point must receive its projected volume change" );
+            vBar += s.mps[k]->getVolumeUndeformed() * s.projected[k]; // checked in the first step: V_p = V0
+          }
+          // the lumped projection keeps the total volume: sum V_p dJbar_p = sum V_p det dF_p
+          Patch plain( nCells, plastic, false, false );
+          if ( afterStep )
+            plain.accept( increment( plain.nDof, 0.03 * scale ) );
+          plain.kernels( U );
+          if ( !afterStep ) {
+            for ( size_t k = 0; k < plain.mps.size(); k++ )
+              vOwn += plain.mps[k]->getVolumeUndeformed() * plain.volumeChange( k );
+            throwExceptionOnFailure( std::abs( vBar - vOwn ) < 1e-12 * vOwn,
+                                     Marmot::Utilities::MakeString()
+                                       << what << ": total volume " << vBar << " vs " << vOwn );
+          }
+          if ( plastic ) {
+            bool yielded = false;
+            for ( size_t k = 0; k < s.mps.size(); k++ )
+              yielded |= s.mps[k]->getStateView( "alphaP" ).stateLocation[0] > alphaPn[k] + 1e-8;
+            throwExceptionOnFailure( yielded, what + ": the test must reach the plastic regime" );
+          }
+          s.stateVars = backup;
+          for ( size_t i = 0; i < s.mps.size(); i++ )
+            s.mps[i]->assignStateVars( s.stateVars[i].data(), static_cast< int >( s.stateVars[i].size() ) );
+          const double err = tangentError( [&]( const Eigen::VectorXd& q ) { return s.trial( q ).first; }, U, K );
+          throwExceptionOnFailure( err < 1e-7,
+                                   Marmot::Utilities::MakeString()
+                                     << what << ": tangent of the nodal projection inconsistent, relative error "
+                                     << err );
+        }
+
+    // at a zero increment from the reference state the tangent is symmetric positive semidefinite
+    {
+      Patch                 s( 4, false, false, true, true );
+      const Eigen::VectorXd U                               = Eigen::VectorXd::Zero( s.nDof );
+      const auto [P, K]                                     = s.trial( U );
+      const double                                     asym = ( K - K.transpose() ).norm() / K.norm();
+      Eigen::SelfAdjointEigenSolver< Eigen::MatrixXd > eig( 0.5 * ( K + K.transpose() ) );
+      throwExceptionOnFailure( asym < 1e-12 && eig.eigenvalues().minCoeff() > -1e-9 * eig.eigenvalues().maxCoeff(),
+                               Marmot::Utilities::MakeString()
+                                 << "nodal F-bar at zero increment: asymmetry " << asym << ", lowest eigenvalue "
+                                 << eig.eigenvalues().minCoeff() );
+    }
+
+    // patch test: a homogeneous increment gives every point exactly its own volume change (the DisplacementCell);
+    // a rigid rotation does not load the cells
+    {
+      Patch           s( 4, false, false, true, true );
+      Patch           plain( 4, false, false, false );
+      const double    phi = 0.5;
+      Eigen::Matrix2d R;
+      R << std::cos( phi ), -std::sin( phi ), std::sin( phi ), std::cos( phi );
+      Eigen::Matrix2d H;
+      H << 0.02, -0.03, 0.01, 0.04;
+      Eigen::VectorXd Ur( s.nDof ), Uh( s.nDof );
+      for ( int a = 0; a < s.nDof / 2; a++ ) {
+        const Eigen::Vector2d Xa( s.X[2 * a], s.X[2 * a + 1] );
+        Ur.segment< 2 >( 2 * a ) = ( R - Eigen::Matrix2d::Identity() ) * Xa;
+        Uh.segment< 2 >( 2 * a ) = H * Xa;
+      }
+      const auto Pr = s.trial( Ur ).first;
+      throwExceptionOnFailure( Pr.norm() < 1e-8,
+                               Marmot::Utilities::MakeString()
+                                 << "nodal F-bar: rigid rotation must not load the cells, |P| = " << Pr.norm() );
+      const auto   Ph   = s.trial( Uh ).first;
+      const auto   Pp   = plain.trial( Uh ).first;
+      const double detH = ( Eigen::Matrix2d::Identity() + H ).determinant();
+      for ( double v : s.projected )
+        throwExceptionOnFailure( std::abs( v - detH ) < 1e-14,
+                                 Marmot::Utilities::MakeString()
+                                   << "nodal F-bar patch test: dJbar " << v << " vs " << detH );
+      throwExceptionOnFailure( ( Ph - Pp ).norm() <= 1e-10 * Pp.norm(),
+                               "nodal F-bar: a homogeneous increment must reproduce the DisplacementCell" );
+    }
+
+    // the B-spline cells support it too
+    {
+      Setup< 2 > s( bSpline< 2 >( 2 ), Points::ThreeOffCenter );
+      throwExceptionOnFailure( s.cell->hasMaterialPointProjection(),
+                               "B-spline F-bar cells must support the nodal projection" );
+    }
+  }
+
 } // namespace
 
 int main()
@@ -798,7 +971,8 @@ int main()
                                                            []() { checkCell< 3 >( lagrangian< 3 >() ); },
                                                            []() { checkCell< 3 >( lagrangian< 3 >( true ) ); },
                                                            []() { checkProjectionPoint(); },
-                                                           []() { checkPatch(); } };
+                                                           []() { checkPatch(); },
+                                                           []() { checkNodal(); } };
   for ( int p = 1; p <= 3; p++ ) {
     testFunctions.push_back( [p]() { checkCell< 2 >( bSpline< 2 >( p ) ); } );
     testFunctions.push_back( [p]() { checkCell< 3 >( bSpline< 3 >( p ) ); } );

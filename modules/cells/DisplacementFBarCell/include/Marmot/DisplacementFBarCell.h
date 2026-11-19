@@ -92,6 +92,20 @@ namespace Marmot::Discretizations::Cells {
    * patch of one cell is the cell-average variant of the incremental F-bar. The patch projection needs no point
    * outside the cell, so it works for all geometries.
    *
+   * **Nodal F-bar** (optional, see Cell::hasMaterialPointProjection()). After setMaterialPointProjectedValues(), every
+   * material point receives its own volume change @f$ \Delta\bar{J}_p @f$, e.g. the nodal average of the host
+   * (lumped L2 projection of @f$ \det\Delta\boldsymbol{F}_p @f$ with the weights @f$ V_p @f$ onto the nodes,
+   * interpolated back with @f$ N_a(\boldsymbol{x}_p) @f$), @f$ s_p =
+   * (\Delta\bar{J}_p/\det\Delta\boldsymbol{F}_p)^{1/n_\mathrm{dim}} @f$. computeMaterialPointProjectionContributions()
+   * reports per material point @f$ v_p = \det\Delta\boldsymbol{F}_p @f$,
+   * @f$ w_p = V_p @f$, @f$ \partial v_p/\partial \Delta q_{Bm} = \det\Delta\boldsymbol{F}_p\,\partial N_B/\partial
+   * x_m|_p
+   * @f$; the cell tangent is the one at fixed @f$ \Delta\bar{J}_p @f$ (as for the patch), and
+   * getMaterialPointProjectionSensitivities() returns @f$ \partial \boldsymbol{R}_c/\partial \Delta\bar{J}_p @f$ with
+   * @f$ \partial \Delta\bar F_{kL}/\partial \Delta\bar{J}_p = \Delta\bar F_{kL}/(n_\mathrm{dim} \Delta\bar{J}_p) @f$.
+   * The patch projection is the special case of equal values @f$ \Delta\bar{J}_p = \Delta J_A @f$ (its sensitivity is
+   * the sum over the material points).
+   *
    * @tparam nDim         Spatial dimension (2: plane strain, 3).
    * @tparam nNodes       Number of cell nodes.
    * @tparam CellBase     Base class, Marmot::Discretizations::Cells::Cell.
@@ -116,22 +130,35 @@ namespace Marmot::Discretizations::Cells {
       Fastor::Tensor< double, nDim, nNodes > dN_dY; ///< shape function gradients @f$ \partial N_B/\partial Y_J @f$
     };
 
-    Center _center;             ///< the geometric center of the hosted material points
+    Center _center;         ///< the geometric center of the hosted material points
 
-    mutable TensorDD _dF_c;     ///< @f$ \Delta\boldsymbol{F}_c @f$ of the last interpolation
+    mutable TensorDD _dF_c; ///< @f$ \Delta\boldsymbol{F}_c @f$ of the last interpolation
 
-    bool   _patchMode  = false; ///< whether the volume change is that of a patch, see setProjectedValue()
-    double _patchValue = 1.0;   ///< the volume change @f$ \Delta J_A @f$ of the patch
+    /// The projection of the volume change: at the center, over a patch, or per material point
+    enum class Projection { Center, Patch, MaterialPoint };
 
-    using RhsSizedU             = Eigen::Matrix< double, Parent::sizeLoadVector, 1 >; ///< a vector of the cell dofs
-    mutable RhsSizedU _dRInt_dJ = RhsSizedU::Zero(); ///< derivative of the internal forces w.r.t. @f$ \Delta J_A @f$
-    mutable RhsSizedU _dRExt_dJ = RhsSizedU::Zero(); ///< derivative of the distributed loads w.r.t. @f$ \Delta J_A @f$
+    Projection            _projection = Projection::Center; ///< the current projection
+    double                _patchValue = 1.0;                ///< the volume change @f$ \Delta J_A @f$ of the patch
+    std::vector< double > _mpValues; ///< the volume changes @f$ \Delta\bar{J}_p @f$ of the material points
+
+    using RhsSizedU         = Eigen::Matrix< double, Parent::sizeLoadVector, 1 >; ///< a vector of the cell dofs
+    using SensitivityMatrix = Eigen::Matrix< double, Parent::sizeLoadVector, Eigen::Dynamic >; ///< one column per MP
+    mutable SensitivityMatrix _dRInt_dJ; ///< derivative of the internal forces w.r.t. the projected volume changes
+    mutable SensitivityMatrix _dRExt_dJ; ///< derivative of the distributed loads w.r.t. the projected volume changes
 
     /**
-     * @brief The volume change all material points receive: that of the patch, or that of the center.
-     * @return @f$ \Delta J_A @f$ or @f$ \det \Delta\boldsymbol{F}_c @f$.
+     * @brief The volume change a material point receives: that of the center, of the patch, or its own.
+     * @param[in] p Index of the material point in the cell.
+     * @return @f$ \det \Delta\boldsymbol{F}_c @f$, @f$ \Delta J_A @f$ or @f$ \Delta\bar{J}_p @f$.
      */
-    double projectedVolumeChange() const { return _patchMode ? _patchValue : Fastor::determinant( _dF_c ); }
+    double projectedVolumeChange( size_t p ) const
+    {
+      switch ( _projection ) {
+      case Projection::Patch: return _patchValue;
+      case Projection::MaterialPoint: return _mpValues[p];
+      default: return Fastor::determinant( _dF_c );
+      }
+    }
     mutable std::vector< TensorDD > _dF_p; ///< unmodified @f$ \Delta\boldsymbol{F}_p @f$ of the last interpolation
 
     /**
@@ -149,7 +176,7 @@ namespace Marmot::Discretizations::Cells {
      */
     double s_p( size_t p ) const
     {
-      return std::pow( projectedVolumeChange() / Fastor::determinant( _dF_p[p] ), 1. / nDim );
+      return std::pow( projectedVolumeChange( p ) / Fastor::determinant( _dF_p[p] ), 1. / nDim );
     }
 
   public:
@@ -206,6 +233,45 @@ namespace Marmot::Discretizations::Cells {
      * @param[out] dR_dValue The derivative, overwritten.
      */
     void getProjectionSensitivity( double* dR_dValue ) const override;
+
+    /**
+     * @brief The projection per material point (nodal F-bar) is supported for all geometries.
+     * @return true.
+     */
+    bool hasMaterialPointProjection() const override { return true; }
+
+    /**
+     * @brief Per material point: @f$ \det\Delta\boldsymbol{F}_p @f$, @f$ V_p @f$ and the derivative, see the class
+     * description.
+     * @param[in]  dQ         Nodal displacement increments.
+     * @param[out] values     @f$ \det\Delta\boldsymbol{F}_p @f$.
+     * @param[out] weights    @f$ V_p @f$.
+     * @param[out] dValues_dQ The derivatives, material point major, overwritten.
+     */
+    void computeMaterialPointProjectionContributions( const double* dQ,
+                                                      double*       values,
+                                                      double*       weights,
+                                                      double*       dValues_dQ ) const override;
+
+    /**
+     * @brief The shape functions at the material points.
+     * @param[out] N @f$ N_A(\boldsymbol{x}_p) @f$, material point major.
+     */
+    void getMaterialPointProjectionBasis( double* N ) const override;
+
+    /**
+     * @brief Switches to the volume changes @f$ \Delta\bar{J}_p @f$ per material point, until the next
+     * assignMaterialPoints().
+     * @param[in] values @f$ \Delta\bar{J}_p @f$, one per material point.
+     */
+    void setMaterialPointProjectedValues( const double* values ) override;
+
+    /**
+     * @brief The derivative of the internal forces and of the distributed loads (since the last interpolation)
+     * w.r.t. the @f$ \Delta\bar{J}_p @f$.
+     * @param[out] dR_dValues The derivatives, material point major, overwritten.
+     */
+    void getMaterialPointProjectionSensitivities( double* dR_dValues ) const override;
 
     /**
      * @brief Interpolates the nodal increments to the hosted material points; they receive the displacement increment
@@ -273,10 +339,11 @@ namespace Marmot::Discretizations::Cells {
     _dF_c.eye();
     _dF_p.assign( locations.size(), _dF_c );
 
-    _patchMode  = false;
+    _projection = Projection::Center;
     _patchValue = 1.0;
-    _dRInt_dJ.setZero();
-    _dRExt_dJ.setZero();
+    _mpValues.assign( locations.size(), 1.0 );
+    _dRInt_dJ = SensitivityMatrix::Zero( Parent::sizeLoadVector, static_cast< Eigen::Index >( locations.size() ) );
+    _dRExt_dJ = SensitivityMatrix::Zero( Parent::sizeLoadVector, static_cast< Eigen::Index >( locations.size() ) );
   }
 
   template < int nDim, int nNodes, class CellBase, GeometryCellPolicy< nDim, nNodes > GeometryCell >
@@ -316,7 +383,7 @@ namespace Marmot::Discretizations::Cells {
   template < int nDim, int nNodes, class CellBase, GeometryCellPolicy< nDim, nNodes > GeometryCell >
   void DisplacementFBarCell< nDim, nNodes, CellBase, GeometryCell >::setProjectedValue( double value )
   {
-    _patchMode  = true;
+    _projection = Projection::Patch;
     _patchValue = value;
   }
 
@@ -324,6 +391,62 @@ namespace Marmot::Discretizations::Cells {
   void DisplacementFBarCell< nDim, nNodes, CellBase, GeometryCell >::getProjectionSensitivity( double* dR_dValue ) const
   {
     Eigen::Map< RhsSizedU > dR( dR_dValue );
+    dR = _dRInt_dJ.rowwise().sum() + _dRExt_dJ.rowwise().sum();
+  }
+
+  template < int nDim, int nNodes, class CellBase, GeometryCellPolicy< nDim, nNodes > GeometryCell >
+  void DisplacementFBarCell< nDim, nNodes, CellBase, GeometryCell >::computeMaterialPointProjectionContributions(
+    const double* dQ,
+    double*       values,
+    double*       weights,
+    double*       dValues_dQ ) const
+  {
+    using namespace Marmot::Math::Tensors::FastorIndices;
+    using namespace Fastor;
+
+    const auto dQU = TensorMap< const double, nNodes, nDim >( dQ );
+
+    TensorDD Eye;
+    Eye.eye();
+
+    const auto& locations = this->_materialPointLocations;
+    for ( size_t p = 0; p < locations.size(); p++ ) {
+      const auto&    mpl  = locations[p];
+      const TensorDD dF   = Eye + einsum< Ai, jA >( dQU, mpl.dN_dY );
+      const double   J    = determinant( dF );
+      const auto     dNdx = evaluate( einsum< ji, jA >( inverse( dF ), mpl.dN_dY ) );
+
+      values[p]  = J;
+      weights[p] = mpl.materialPoint->getVolumeUndeformed() * determinant( mpl.materialPoint->dY_dX() );
+      Eigen::Map< RhsSizedU > dv( dValues_dQ + p * Parent::sizeLoadVector );
+      for ( int B = 0; B < nNodes; B++ )
+        for ( int m = 0; m < nDim; m++ )
+          dv( B * nDim + m ) = J * dNdx( m, B );
+    }
+  }
+
+  template < int nDim, int nNodes, class CellBase, GeometryCellPolicy< nDim, nNodes > GeometryCell >
+  void DisplacementFBarCell< nDim, nNodes, CellBase, GeometryCell >::getMaterialPointProjectionBasis( double* N ) const
+  {
+    const auto& locations = this->_materialPointLocations;
+    for ( size_t p = 0; p < locations.size(); p++ )
+      for ( int A = 0; A < nNodes; A++ )
+        N[p * nNodes + A] = locations[p].N( A );
+  }
+
+  template < int nDim, int nNodes, class CellBase, GeometryCellPolicy< nDim, nNodes > GeometryCell >
+  void DisplacementFBarCell< nDim, nNodes, CellBase, GeometryCell >::setMaterialPointProjectedValues(
+    const double* values )
+  {
+    _projection = Projection::MaterialPoint;
+    _mpValues.assign( values, values + this->_materialPointLocations.size() );
+  }
+
+  template < int nDim, int nNodes, class CellBase, GeometryCellPolicy< nDim, nNodes > GeometryCell >
+  void DisplacementFBarCell< nDim, nNodes, CellBase, GeometryCell >::getMaterialPointProjectionSensitivities(
+    double* dR_dValues ) const
+  {
+    Eigen::Map< SensitivityMatrix > dR( dR_dValues, Parent::sizeLoadVector, _dRInt_dJ.cols() );
     dR = _dRInt_dJ + _dRExt_dJ;
   }
 
@@ -352,9 +475,8 @@ namespace Marmot::Discretizations::Cells {
     TensorDD Eye;
     Eye.eye();
 
-    if ( !_patchMode )
+    if ( _projection == Projection::Center )
       _dF_c = Eye + einsum< Ai, jA >( dQU, _center.dN_dY );
-    const double detF_c = projectedVolumeChange();
 
     _dRInt_dJ.setZero();
     _dRExt_dJ.setZero();
@@ -366,7 +488,7 @@ namespace Marmot::Discretizations::Cells {
       const auto du = evaluate( einsum< A, Ai >( mpl.N, dQU ) );
       _dF_p[p]      = Eye + einsum< Ai, jA >( dQU, mpl.dN_dY );
 
-      const double   s         = std::pow( detF_c / determinant( _dF_p[p] ), 1. / nDim );
+      const double   s         = std::pow( projectedVolumeChange( p ) / determinant( _dF_p[p] ), 1. / nDim );
       const TensorDD du_dY_bar = s * _dF_p[p] - Eye;
 
       mpl.materialPoint->incrementDeformation( du, du_dY_bar );
@@ -386,13 +508,14 @@ namespace Marmot::Discretizations::Cells {
     const auto& dN_dY = this->_materialPointLocations[p].dN_dY;
     const auto& dF_p  = _dF_p[p];
 
-    const double   s     = std::pow( projectedVolumeChange() / determinant( dF_p ), 1. / nDim );
+    const double   s     = std::pow( projectedVolumeChange( p ) / determinant( dF_p ), 1. / nDim );
     const TensorDD dFbar = s * dF_p;
 
-    // d ln det(dF)/d dq_Bm, at the material point and at the center (none for the patch: at fixed dJ_A)
+    // d ln det(dF)/d dq_Bm, at the material point and at the center (none for the patch and the nodal projection:
+    // at fixed projected values)
     const Tensor< double, nDim, nNodes > dN_dx = einsum< ji, jA >( inverse( dF_p ), dN_dY );
     Tensor< double, nDim, nNodes >       dNc_dx( 0.0 );
-    if ( !_patchMode )
+    if ( _projection == Projection::Center )
       dNc_dx = einsum< ji, jA >( inverse( _dF_c ), _center.dN_dY );
 
     dFdQ result;
@@ -448,8 +571,8 @@ namespace Marmot::Discretizations::Cells {
 
       r_U += einsum< iA, ij >( dN_dx, S ) * V0;
 
-      if ( _patchMode ) { // dR_Aj/d dJ_A = dN_A/dx_i C_ijkL dFbar_kL / (nDim dJ_A) V0
-        const TensorDD dFbar_dJ = s_p( p ) * _dF_p[p] / ( nDim * _patchValue );
+      if ( _projection != Projection::Center ) { // dR_Aj/d dJ_p = dN_A/dx_i C_ijkL dFbar_kL / (nDim dJ_p) V0
+        const TensorDD dFbar_dJ = s_p( p ) * _dF_p[p] / ( nDim * projectedVolumeChange( p ) );
         TensorDD       dS_dJ( 0.0 );
         for ( int i = 0; i < nDim; i++ )
           for ( int j = 0; j < nDim; j++ )
@@ -459,7 +582,7 @@ namespace Marmot::Discretizations::Cells {
         for ( int A = 0; A < nNodes; A++ )
           for ( int j = 0; j < nDim; j++ )
             for ( int i = 0; i < nDim; i++ )
-              _dRInt_dJ( A * nDim + j ) += dN_dx( i, A ) * dS_dJ( i, j ) * V0;
+              _dRInt_dJ( A * nDim + j, static_cast< Eigen::Index >( p ) ) += dN_dx( i, A ) * dS_dJ( i, j ) * V0;
       }
 
       // K_(Aj)(Bk) = ( dN_A/dx_i dS_ij/dq_Bk - dN_A/dx_k S_ij dN_B/dx_i ) V0
@@ -532,15 +655,15 @@ namespace Marmot::Discretizations::Cells {
 
         r_U -= outer( mpl.N, f );
 
-        if ( _patchMode ) {
-          const TensorDD dFbar_dJ = s_p( p ) * _dF_p[p] / ( nDim * _patchValue );
+        if ( _projection != Projection::Center ) {
+          const TensorDD dFbar_dJ = s_p( p ) * _dF_p[p] / ( nDim * projectedVolumeChange( p ) );
           for ( int A = 0; A < nNodes; A++ )
             for ( int j = 0; j < nDim; j++ ) {
               double df_dJ = 0;
               for ( int k = 0; k < nDim; k++ )
                 for ( int L = 0; L < nDim; L++ )
                   df_dJ += df_dDFbar( j, k, L ) * dFbar_dJ( k, L );
-              _dRExt_dJ( Parent::idxU + A * nDim + j ) -= mpl.N( A ) * df_dJ;
+              _dRExt_dJ( Parent::idxU + A * nDim + j, static_cast< Eigen::Index >( p ) ) -= mpl.N( A ) * df_dJ;
             }
         }
 
